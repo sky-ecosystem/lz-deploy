@@ -1,0 +1,167 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+pragma solidity ^0.8.24;
+
+import {
+    LZInit,
+    GovConfig,
+    EndpointLike,
+    UlnLike,
+    OAppLike
+} from "lz-init-lib/LZInit.sol";
+
+import { GovBridgeDeployer, GovRecvConfig } from "src/GovBridgeDeployer.sol";
+
+import { LZDeployTestBase } from "./LZDeployTestBase.sol";
+
+interface L2GovernanceRelayLike {
+    function l1Eid() external view returns (uint32);
+    function l2Oapp() external view returns (address);
+    function l1GovernanceRelay() external view returns (address);
+    function delay() external view returns (uint256);
+    function gracePeriod() external view returns (uint256);
+    function bud(address usr) external view returns (uint256);
+}
+
+interface OwnableLike {
+    function owner() external view returns (address);
+}
+
+/// @dev The remote half of the governance bridge, run against a mainnet fork. Its peer is the real
+///      chainlog `LZ_GOV_SENDER`, which lets the last test drive `wireGovPeer` against it.
+contract GovBridgeDeployerTest is LZDeployTestBase {
+
+    address deployerEOA = makeAddr("deployerEOA");
+    address freezer     = makeAddr("freezer");
+
+    uint256 constant DELAY        = 2 days;
+    uint256 constant GRACE_PERIOD = 30 days;
+
+    GovBridgeDeployer dep;
+    address           receiver;
+    address           relay;
+
+    GovRecvConfig recvCfg;
+
+    function setUp() public override {
+        super.setUp();
+
+        recvCfg = GovRecvConfig({ recvLib: RECV_LIB, recvUlnCfg: govUlnCfg });
+
+        address[] memory bud = new address[](1);
+        bud[0] = freezer;
+
+        vm.prank(deployerEOA);
+        dep = new GovBridgeDeployer({
+            endpoint:    ENDPOINT,
+            l1GovSender: GOV_SENDER,
+            l1GovRelay:  L1_GOV_RELAY,
+            delay:       DELAY,
+            gracePeriod: GRACE_PERIOD,
+            bud:         bud,
+            cfg:         recvCfg
+        });
+
+        receiver = dep.receiver();
+        relay    = dep.relay();
+    }
+
+    // ==================================
+    //  Receiver
+    // ==================================
+
+    function test_receiverIsPeeredToL1GovSender() public view {
+        assertEq(OAppLike(receiver).peers(ETH_EID), bytes32(uint256(uint160(GOV_SENDER))));
+        assertEq(OAppLike(receiver).endpoint(),     ENDPOINT);
+    }
+
+    function test_receiveLibraryIsPinnedNotDefault() public view {
+        (address recvLib, bool isDefault) = EndpointLike(ENDPOINT).getReceiveLibrary(receiver, ETH_EID);
+        assertEq(recvLib, RECV_LIB);
+        assertFalse(isDefault, "receive library must be set explicitly, not inherited");
+        assertEq(EndpointLike(ENDPOINT).receiveLibraryTimeout(receiver, ETH_EID), address(0));
+    }
+
+    function test_receiveUlnConfigMatchesWingSet() public view {
+        _assertUlnConfig(abi.encode(UlnLike(RECV_LIB).getAppUlnConfig(receiver, ETH_EID)), govUlnCfg);
+    }
+
+    function test_receiverHandedToRelay() public view {
+        assertEq(OwnableLike(receiver).owner(),              relay, "relay must own the receiver");
+        assertEq(EndpointLike(ENDPOINT).delegates(receiver), relay, "relay must be the delegate");
+    }
+
+    /// @dev No residual power once the constructor returns.
+    function test_deployerRetainsNoControl() public view {
+        assertTrue(OwnableLike(receiver).owner() != address(dep));
+        assertTrue(OwnableLike(receiver).owner() != deployerEOA);
+        assertTrue(EndpointLike(ENDPOINT).delegates(receiver) != address(dep));
+        assertTrue(EndpointLike(ENDPOINT).delegates(receiver) != deployerEOA);
+    }
+
+    // ==================================
+    //  Relay
+    // ==================================
+
+    function test_relayConfiguration() public view {
+        L2GovernanceRelayLike r = L2GovernanceRelayLike(relay);
+
+        assertEq(r.l1Eid(),             ETH_EID);
+        assertEq(r.l2Oapp(),            receiver, "relay must listen to the receiver we deployed");
+        assertEq(r.l1GovernanceRelay(), L1_GOV_RELAY);
+        assertEq(r.delay(),             DELAY);
+        assertEq(r.gracePeriod(),       GRACE_PERIOD);
+        assertEq(r.bud(freezer),        1, "freezer must be budded");
+    }
+
+    function test_revertsOnZeroInputs() public {
+        address[] memory bud = new address[](0);
+
+        vm.expectRevert("GovBridgeDeployer/gov-sender-is-zero");
+        new GovBridgeDeployer(ENDPOINT, address(0), L1_GOV_RELAY, DELAY, GRACE_PERIOD, bud, recvCfg);
+
+        vm.expectRevert("GovBridgeDeployer/gov-relay-is-zero");
+        new GovBridgeDeployer(ENDPOINT, GOV_SENDER, address(0), DELAY, GRACE_PERIOD, bud, recvCfg);
+
+        GovRecvConfig memory badCfg = GovRecvConfig({ recvLib: address(0), recvUlnCfg: govUlnCfg });
+        vm.expectRevert("GovBridgeDeployer/recv-lib-is-zero");
+        new GovBridgeDeployer(ENDPOINT, GOV_SENDER, L1_GOV_RELAY, DELAY, GRACE_PERIOD, bud, badCfg);
+    }
+
+    /// @dev The relay rejects a grace period too short to execute in.
+    function test_revertsOnShortGracePeriod() public {
+        vm.expectRevert("L2GovernanceRelay/grace-period-too-short");
+        new GovBridgeDeployer(ENDPOINT, GOV_SENDER, L1_GOV_RELAY, DELAY, 1 minutes, new address[](0), recvCfg);
+    }
+
+    // ==================================
+    //  Acceptance: the L1 spell half accepts these outputs
+    // ==================================
+
+    /// @dev `wireGovPeer` completes the bridge and consumes both addresses this deployer produces:
+    ///      the receiver as peer, the relay as the whitelisted target. `NO_CCIP_DVN` skips the shared
+    ///      CCIP adapter's route check — routing it is lz-gov-dvns-deploy's job.
+    function test_wireGovPeerAcceptsDeployedReceiver() public {
+        GovConfig memory cfg = GovConfig({
+            peer:         receiver,
+            sendLib:      SEND_LIB,
+            execCfg:      execCfg,
+            sendUlnCfg:   govUlnCfg,
+            ccipDvnIndex: type(uint256).max, // LZInit.NO_CCIP_DVN
+            l2GovRelay:   relay
+        });
+
+        vm.startPrank(PAUSE_PROXY);
+        LZInit.wireGovPeer(DST_EID, cfg);
+        vm.stopPrank();
+
+        assertEq(OAppLike(GOV_SENDER).peers(DST_EID), bytes32(uint256(uint160(receiver))));
+        assertTrue(
+            GovSenderLike(GOV_SENDER).canCallTarget(L1_GOV_RELAY, DST_EID, bytes32(uint256(uint160(relay)))),
+            "L1 relay must be whitelisted to call the L2 relay"
+        );
+    }
+}
+
+interface GovSenderLike {
+    function canCallTarget(address srcSender, uint32 dstEid, bytes32 dstTarget) external view returns (bool);
+}

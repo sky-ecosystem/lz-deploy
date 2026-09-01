@@ -1,0 +1,17 @@
+{
+  "name": "lz-deploy",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Solidity deployers for Sky's LayerZero OApps (Solidity sources only, no JS tooling)",
+  "//": "Versions are pinned to what sky-oapp-oft's pnpm-lock.yaml resolves, so the contracts compile against exactly the sources they were written and audited against.",
+  "dependencies": {
+    "@layerzerolabs/lz-evm-messagelib-v2": "3.0.139",
+    "@layerzerolabs/lz-evm-protocol-v2": "3.0.139",
+    "@layerzerolabs/oapp-evm": "0.3.2",
+    "@layerzerolabs/oapp-evm-upgradeable": "0.1.3",
+    "@layerzerolabs/oft-evm": "3.2.1",
+    "@layerzerolabs/oft-evm-upgradeable": "3.2.1",
+    "@openzeppelin/contracts": "5.4.0",
+    "@openzeppelin/contracts-upgradeable": "5.4.0"
+  }
+}
