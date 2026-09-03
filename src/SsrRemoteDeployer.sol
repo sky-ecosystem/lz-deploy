@@ -8,11 +8,6 @@ import { LZComposeReceiver }               from "xchain-helpers/receivers/LZComp
 
 import { LZInit, UlnConfig, EndpointLike } from "lz-init-lib/LZInit.sol";
 
-interface OAppAdminLike {
-    function setDelegate(address delegate) external;
-    function transferOwnership(address newOwner) external;
-}
-
 /// @notice Deploys the remote half of an SSR oracle bridge: the oracle, its rate-provider adapters,
 ///         and the LZ receiver that feeds it from mainnet.
 /// @dev    Split into two steps to break the circular dependency with the L1 forwarder, which takes
@@ -40,8 +35,7 @@ contract SsrRemoteDeployer {
     SSRBalancerRateProviderAdapter  public immutable balancerAdapter;
     SSRChainlinkRateProviderAdapter public immutable chainlinkAdapter;
 
-    address public receiver;
-    bool    public handedOff;
+    LZComposeReceiver public receiver;
 
     event ReceiverDeployed(address indexed receiver, address indexed forwarder);
     event HandedOff(address indexed gov, address indexed oracleAdmin);
@@ -81,36 +75,33 @@ contract SsrRemoteDeployer {
         address          recvLib,
         UlnConfig memory recvUlnCfg
     ) external onlyDeployer {
-        require(receiver  == address(0), "SsrRemoteDeployer/already-deployed");
-        require(forwarder != address(0), "SsrRemoteDeployer/forwarder-is-zero");
-        require(recvLib   != address(0), "SsrRemoteDeployer/recv-lib-is-zero");
 
         address predicted = predictedReceiver();
 
-        receiver = address(new LZComposeReceiver({
+        receiver = new LZComposeReceiver({
             _destinationEndpoint: endpoint,
             _srcEid:             ETH_EID,
             _sourceAuthority:    bytes32(uint256(uint160(forwarder))),
             _target:             address(oracle),
             _delegate:           address(this),
             _owner:              address(this)
-        }));
+        });
 
         // The forwarder holds the receiver as an immutable, so a mismatch cannot be reconfigured away.
-        require(receiver == predicted, "SsrRemoteDeployer/receiver-address-mismatch");
+        require(address(receiver) == predicted, "SsrRemoteDeployer/receiver-address-mismatch");
 
-        oracle.grantRole(oracle.DATA_PROVIDER_ROLE(), receiver);
+        oracle.grantRole(oracle.DATA_PROVIDER_ROLE(), address(receiver));
 
         EndpointLike(endpoint).setReceiveLibrary({
-            oapp:        receiver,
+            oapp:        address(receiver),
             eid:         ETH_EID,
             newLib:      recvLib,
             gracePeriod: 0
         });
 
-        LZInit.setUlnConfig(receiver, ETH_EID, recvLib, recvUlnCfg);
+        LZInit.setUlnConfig(address(receiver), ETH_EID, recvLib, recvUlnCfg);
 
-        emit ReceiverDeployed(receiver, forwarder);
+        emit ReceiverDeployed(address(receiver), forwarder);
     }
 
     /// @notice Hand the receiver to governance and settle the oracle's admin role.
@@ -120,14 +111,8 @@ contract SsrRemoteDeployer {
     ///         data source then means a new oracle and new consumers. Same trade-off
     ///         `xchain-ssr-oracle`'s deploy script offers.
     function handOff(address gov, address oracleAdmin) external onlyDeployer {
-        require(receiver != address(0), "SsrRemoteDeployer/no-receiver");
-        require(gov      != address(0), "SsrRemoteDeployer/gov-is-zero");
-        require(!handedOff,             "SsrRemoteDeployer/handed-off");
-
-        handedOff = true;
-
-        OAppAdminLike(receiver).setDelegate(gov);
-        OAppAdminLike(receiver).transferOwnership(gov);
+        receiver.setDelegate(gov);
+        receiver.transferOwnership(gov);
 
         if (oracleAdmin != address(0)) {
             oracle.grantRole(oracle.DEFAULT_ADMIN_ROLE(), oracleAdmin);

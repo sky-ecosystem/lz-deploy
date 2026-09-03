@@ -131,7 +131,7 @@ contract DeploySsrBridge is Script {
         console.log("--- remote ---");
         console.log("SsrRemoteDeployer:     ", address(remoteDep));
         console.log("SSRAuthOracle:         ", address(remoteDep.oracle()));
-        console.log("LZComposeReceiver:     ", remoteDep.receiver());
+        console.log("LZComposeReceiver:     ", address(remoteDep.receiver()));
         console.log("BalancerRateProvider:  ", address(remoteDep.balancerAdapter()));
         console.log("ChainlinkRateProvider: ", address(remoteDep.chainlinkAdapter()));
         console.log("");

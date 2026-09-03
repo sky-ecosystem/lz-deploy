@@ -86,7 +86,7 @@ contract SsrDeployersTest is LZDeployTestBase {
 
         // 3. remote: receiver, now that the forwarder address is known
         remoteDep.deployReceiver(forwarder, RECV_LIB, govUlnCfg);
-        receiver = remoteDep.receiver();
+        receiver = address(remoteDep.receiver());
 
         vm.stopPrank();
 
@@ -134,13 +134,8 @@ contract SsrDeployersTest is LZDeployTestBase {
 
     function test_receiverCannotBeDeployedTwice() public {
         vm.prank(deployerEOA);
-        vm.expectRevert("SsrRemoteDeployer/already-deployed");
+        vm.expectRevert("SsrRemoteDeployer/receiver-address-mismatch");
         remoteDep.deployReceiver(forwarder, RECV_LIB, govUlnCfg);
-    }
-
-    function test_forwarderRejectsZeroReceiver() public {
-        vm.expectRevert("SsrForwarderDeployer/receiver-is-zero");
-        new SsrForwarderDeployer(SUSDS, ENDPOINT, address(0), DST_EID);
     }
 
     // ==================================
@@ -254,21 +249,6 @@ contract SsrDeployersTest is LZDeployTestBase {
 
         assertEq(ForwarderLike(forwarder).owner(),            PAUSE_PROXY);
         assertEq(EndpointLike(ENDPOINT).delegates(forwarder), PAUSE_PROXY);
-    }
-
-    function test_forwarderHandOffRequiresConfigure() public {
-        vm.prank(deployerEOA);
-        vm.expectRevert("SsrForwarderDeployer/not-configured");
-        fwdDep.handOff();
-    }
-
-    function test_forwarderConfigureIsOneShot() public {
-        vm.startPrank(deployerEOA);
-        fwdDep.configure(fwdCfg);
-
-        vm.expectRevert("SsrForwarderDeployer/already-configured");
-        fwdDep.configure(fwdCfg);
-        vm.stopPrank();
     }
 
     // ==================================

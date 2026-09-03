@@ -14,7 +14,8 @@ following the factory style of [`lz-gov-dvns-deploy`](https://github.com/sky-eco
 
 Supported:
 
-- **Bringing a new chain onto SkyLink** — `GovernanceOAppReceiver` + `L2GovernanceRelay`, and one
+- **Bringing a new chain onto SkyLink** — `GovernanceOAppReceiver` + `L2GovernanceRelay` + the
+  `LZL2Spell` the relay delegatecalls, and one
   `SkyOFTAdapterMintBurn` (behind a UUPS proxy) per token, wired to every remote it serves at go-live.
 - **SSR oracle bridges over LayerZero** — the mainnet `SSROracleForwarderLZ`, and the remote oracle,
   rate-provider adapters and receiver.
@@ -48,7 +49,7 @@ fees zero, per-eid rate limits zero, not paused, no message inspector, and owner
 acceptance tests: deploy, hand off, then run lz-init-lib's own function and require that it does not
 revert.
 
-`OFTDeployer` goes further and calls **`LZInit.wireOftPeer` itself** — the same code a spell runs on
+The OFT deployers go further and call **`LZInit.wireOftPeer` itself** — the same code a spell runs on
 the other side of the route. The two ends of a pathway are configured by one implementation rather
 than two that have to be kept in agreement.
 
@@ -59,16 +60,17 @@ ownership: the reverse order strands the delegate.
 
 | Contract | Chain | Shape |
 | --- | --- | --- |
-| `src/OFTDeployer.sol` | new chain | constructor → `wireRemote` per remote → `handOff` |
+| `src/L1OFTDeployer.sol` | mainnet | single constructor, ends owned by the pause proxy |
+| `src/L2OFTDeployer.sol` | new chain | single constructor, ends owned by the relay |
 | `src/GovBridgeDeployer.sol` | new chain | single constructor, ends owned by the relay |
 | `src/SsrRemoteDeployer.sol` | remote | constructor → `deployReceiver` → `handOff` |
 | `src/SsrForwarderDeployer.sol` | mainnet | constructor → `configure` → `handOff` |
 
-`GovBridgeDeployer` does everything in its constructor because there is nothing to do between steps.
-`OFTDeployer` is staged because a new chain wires a variable number of remotes and each leg is a large
-config payload worth reviewing on its own. `SsrForwarderDeployer` is staged because the receiver
-address must be predicted before the forwarder exists (below), and because its bridge is the one that
-can actually be tested before a spell.
+`GovBridgeDeployer` and both OFT deployers do everything in their constructors because there is
+nothing to do between steps: every input is known up front, and nothing they deploy can be tested
+before a spell wires the far side. `SsrForwarderDeployer` and `SsrRemoteDeployer` are staged because
+the receiver address must be predicted before the forwarder exists (below), and because their bridge
+is the one that can actually be tested before a spell.
 
 **One OFT deployer per token.** The adapter implementation takes its token as a constructor
 immutable, so each deployer embeds one implementation's creation code — ~28KB of initcode against the
@@ -97,8 +99,9 @@ instead; keeping the arithmetic on-chain makes it *asserted* rather than assumed
 ## Layout
 
 ```
-src/OFTDeployer.sol            new chain: SkyOFTAdapterMintBurn proxy, wired and handed to the relay
-src/GovBridgeDeployer.sol      new chain: GovernanceOAppReceiver + L2GovernanceRelay
+src/L1OFTDeployer.sol          mainnet:   SkyOFTAdapter proxy, wired and handed to the pause proxy
+src/L2OFTDeployer.sol          new chain: SkyOFTAdapterMintBurn proxy, wired and handed to the relay
+src/GovBridgeDeployer.sol      new chain: GovernanceOAppReceiver + L2GovernanceRelay + LZL2Spell
 src/SsrForwarderDeployer.sol   mainnet:   SSROracleForwarderLZ
 src/SsrRemoteDeployer.sol      remote:    SSRAuthOracle + adapters + LZComposeReceiver
 src/LzOptions.sol              the enforced-options encoding spells assert against
@@ -150,7 +153,7 @@ parameters — exactly how they are driven in production.
 The tests worth reading first are the acceptance ones, each of which runs the real lz-init-lib
 function against freshly deployed state:
 
-- `test_activateOftAcceptsDeployedState` — `LZInit.activateOft` on an `OFTDeployer` result
+- `test_activateOftAcceptsDeployedState` — `LZInit.activateOft` on an `L2OFTDeployer` result
 - `test_wireGovPeerAcceptsDeployedReceiver` — `LZInit.wireGovPeer` against a `GovBridgeDeployer` result
 - `test_activateSsrForwarderAcceptsDeployedState` — `LZInit.activateSsrForwarder` on the SSR pair
 
@@ -194,7 +197,6 @@ above carry the weight they do: they are the only pre-spell evidence that the co
 3. **Rate limits for a brand-new chain.** The deployers leave per-eid limits at zero so governance
    turns the bridge on via `activateOft`, which requires zero. lz-init-lib's README example for a new
    chain shows no `activateOft` on the new side, implying the deployer sets them there; both are
-   supported (`OFTDeployer.wireRemote` takes limits, and `setRateLimits` can change them pre-handoff),
-   but zero is the default.
+   supported (both OFT deployers take per-remote limits), but zero is the default.
 4. **`xchain-ssr-oracle` is pinned to `master`**, not the `lz-gov-bridge-support` branch: that work
    merged (PR #48) and the branch was deleted. `master`'s forwarder is byte-identical to the branch's.

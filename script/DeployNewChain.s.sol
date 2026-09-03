@@ -3,10 +3,12 @@ pragma solidity ^0.8.24;
 
 import { Script, console } from "forge-std/Script.sol";
 
+import { RateLimitAccountingType } from "sky-oapp-oft/interfaces/ISkyRateLimiter.sol";
+
 import { OftConfig, RateLimits, UlnConfig, ExecutorConfig } from "lz-init-lib/LZInit.sol";
 
-import { OFTDeployer }                      from "src/OFTDeployer.sol";
-import { GovBridgeDeployer, GovRecvConfig } from "src/GovBridgeDeployer.sol";
+import { L2OFTDeployer, L2OftDeployment, RemoteWiring } from "src/L2OFTDeployer.sol";
+import { GovBridgeDeployer, GovRecvConfig }         from "src/GovBridgeDeployer.sol";
 
 /// @notice Brings a new chain onto SkyLink: its half of the governance bridge, plus one OFT adapter
 ///         per token, wired to every remote it serves at go-live and handed to the new relay.
@@ -124,35 +126,50 @@ contract DeployNewChain is Script {
             })
         });
 
-        address relay = govDep.relay();
+        address relay = address(govDep.relay());
 
-        OFTDeployer usdsDep  = new OFTDeployer(USDS,  ENDPOINT);
-        OFTDeployer susdsDep = new OFTDeployer(SUSDS, ENDPOINT);
-
-        for (uint256 i; i < remotes.length; ++i) {
-            usdsDep.wireRemote(remotes[i].eid,  _oftCfg(remotes[i].usdsPeer),  _zeroLimits());
-            susdsDep.wireRemote(remotes[i].eid, _oftCfg(remotes[i].susdsPeer), _zeroLimits());
-        }
+        RemoteWiring[] memory usdsRemotes  = new RemoteWiring[](remotes.length);
+        RemoteWiring[] memory susdsRemotes = new RemoteWiring[](remotes.length);
 
         // Rate limits stay at zero: governance turns the bridge on with `activateOft`, which verifies
-        // the whole config and requires them to still be zero. Call `setAccountingType` before the
-        // handoffs below if a chain wants `Gross` instead of the default `Net`.
-        usdsDep.handOff(relay);
-        susdsDep.handOff(relay);
+        // the whole config and requires them to still be zero. Pass `Gross` below if a chain wants
+        // that instead of the default `Net`.
+        for (uint256 i; i < remotes.length; ++i) {
+            usdsRemotes[i]  = RemoteWiring(remotes[i].eid, _oftCfg(remotes[i].usdsPeer),  _zeroLimits());
+            susdsRemotes[i] = RemoteWiring(remotes[i].eid, _oftCfg(remotes[i].susdsPeer), _zeroLimits());
+        }
+
+        L2OFTDeployer usdsDep  = new L2OFTDeployer(L2OftDeployment({
+            token:          USDS,
+            endpoint:       ENDPOINT,
+            accountingType: RateLimitAccountingType.Net,
+            pausers:        _pausers(),
+            remotes:        usdsRemotes,
+            gov:            relay
+        }));
+        L2OFTDeployer susdsDep = new L2OFTDeployer(L2OftDeployment({
+            token:          SUSDS,
+            endpoint:       ENDPOINT,
+            accountingType: RateLimitAccountingType.Net,
+            pausers:        _pausers(),
+            remotes:        susdsRemotes,
+            gov:            relay
+        }));
 
         vm.stopBroadcast();
 
         console.log("--- governance bridge ---");
         console.log("GovBridgeDeployer:      ", address(govDep));
-        console.log("GovernanceOAppReceiver: ", govDep.receiver());
+        console.log("GovernanceOAppReceiver: ", address(govDep.receiver()));
         console.log("L2GovernanceRelay:      ", relay);
+        console.log("LZL2Spell:              ", address(govDep.l2Spell()));
         console.log("--- OFT adapters ---");
-        console.log("USDS  OFTDeployer:      ", address(usdsDep));
-        console.log("USDS  adapter:          ", usdsDep.oft());
-        console.log("USDS  implementation:   ", usdsDep.implementation());
-        console.log("SUSDS OFTDeployer:      ", address(susdsDep));
-        console.log("SUSDS adapter:          ", susdsDep.oft());
-        console.log("SUSDS implementation:   ", susdsDep.implementation());
+        console.log("USDS  L2OFTDeployer:    ", address(usdsDep));
+        console.log("USDS  adapter:          ", address(usdsDep.oft()));
+        console.log("USDS  implementation:   ", address(usdsDep.implementation()));
+        console.log("SUSDS L2OFTDeployer:    ", address(susdsDep));
+        console.log("SUSDS adapter:          ", address(susdsDep.oft()));
+        console.log("SUSDS implementation:   ", address(susdsDep.implementation()));
         console.log("--- wired remotes ---");
         for (uint256 i; i < remotes.length; ++i) {
             console.log(remotes[i].name, remotes[i].eid);
@@ -188,6 +205,11 @@ contract DeployNewChain is Script {
             }),
             optionsGas: OFT_OPTIONS_GAS
         });
+    }
+
+    /// @dev None by default; pausing is a per-chain operational choice.
+    function _pausers() internal pure returns (address[] memory) {
+        return new address[](0);
     }
 
     function _zeroLimits() internal pure returns (RateLimits memory) {

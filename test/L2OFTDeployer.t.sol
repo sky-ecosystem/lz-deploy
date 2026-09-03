@@ -13,22 +13,21 @@ import {
     OFTAdapterLike
 } from "lz-init-lib/LZInit.sol";
 
-import { OFTDeployer } from "src/OFTDeployer.sol";
-import { LzOptions }   from "src/LzOptions.sol";
+import { L2OFTDeployer, L2OftDeployment, RemoteWiring } from "src/L2OFTDeployer.sol";
+import { LzOptions }                                 from "src/LzOptions.sol";
 
 import { LZDeployTestBase } from "./LZDeployTestBase.sol";
 
-/// @notice Acceptance test for `OFTDeployer`: deploy as the deployer would, then run the
+/// @notice Acceptance test for `L2OFTDeployer`: deploy as the deployer would, then run the
 ///         governance-side check that gates the spell.
 /// @dev    `activateOft` re-reads the whole config and reverts on any mismatch, so it passing is the
 ///         real statement of agreement with lz-init-lib. The per-field assertions localise failures.
-contract OFTDeployerTest is LZDeployTestBase {
+contract L2OFTDeployerTest is LZDeployTestBase {
 
-    address deployerEOA = makeAddr("deployerEOA");
-    address l2GovRelay  = makeAddr("l2GovRelay");
-    address remotePeer  = makeAddr("remotePeer");
+    address l2GovRelay = makeAddr("l2GovRelay");
+    address remotePeer = makeAddr("remotePeer");
 
-    OFTDeployer dep;
+    L2OFTDeployer dep;
     address     oft;
 
     OftConfig oftCfg;
@@ -46,14 +45,45 @@ contract OFTDeployerTest is LZDeployTestBase {
             optionsGas: OPTIONS_GAS
         });
 
-        vm.prank(deployerEOA);
-        dep = new OFTDeployer(USDS, ENDPOINT);
-        oft = dep.oft();
+        dep = _deploy(RateLimitAccountingType.Net, _noPausers(), _remotes(DST_EID, _zero()));
+        oft = address(dep.oft());
     }
 
-    function _wire() internal {
-        vm.prank(deployerEOA);
-        dep.wireRemote(DST_EID, oftCfg, RateLimits(0, 0, 0, 0));
+    function _deploy(
+        RateLimitAccountingType accountingType,
+        address[]        memory pausers,
+        RemoteWiring[]   memory remotes
+    ) internal returns (L2OFTDeployer) {
+        return new L2OFTDeployer(_params(accountingType, pausers, remotes, l2GovRelay));
+    }
+
+    function _params(
+        RateLimitAccountingType accountingType,
+        address[]        memory pausers,
+        RemoteWiring[]   memory remotes,
+        address                 gov
+    ) internal view returns (L2OftDeployment memory) {
+        return L2OftDeployment({
+            token:          USDS,
+            endpoint:       ENDPOINT,
+            accountingType: accountingType,
+            pausers:        pausers,
+            remotes:        remotes,
+            gov:            gov
+        });
+    }
+
+    function _remotes(uint32 eid, RateLimits memory limits) internal view returns (RemoteWiring[] memory rs) {
+        rs    = new RemoteWiring[](1);
+        rs[0] = RemoteWiring(eid, oftCfg, limits);
+    }
+
+    function _noPausers() internal pure returns (address[] memory) {
+        return new address[](0);
+    }
+
+    function _zero() internal pure returns (RateLimits memory) {
+        return RateLimits(0, 0, 0, 0);
     }
 
     // ==================================
@@ -61,11 +91,6 @@ contract OFTDeployerTest is LZDeployTestBase {
     // ==================================
 
     function test_activateOftAcceptsDeployedState() public {
-        _wire();
-
-        vm.prank(deployerEOA);
-        dep.handOff(l2GovRelay);
-
         RateLimits memory limits = RateLimits({
             inboundWindow:  1 days,
             inboundLimit:   10_000_000e18,
@@ -77,7 +102,7 @@ contract OFTDeployerTest is LZDeployTestBase {
         vm.startPrank(l2GovRelay);
         LZInit.activateOft({
             oft:              oft,
-            oftImp:           dep.implementation(),
+            oftImp:           address(dep.implementation()),
             remoteEid:        DST_EID,
             cfg:              oftCfg,
             rateLimits:       limits,
@@ -96,18 +121,12 @@ contract OFTDeployerTest is LZDeployTestBase {
 
     /// @dev `activateOft` asserts the exact accounting type, so the deployer must be able to set it.
     function test_activateOftAcceptsGrossAccounting() public {
-        vm.prank(deployerEOA);
-        dep.setAccountingType(RateLimitAccountingType.Gross);
-
-        _wire();
-
-        vm.prank(deployerEOA);
-        dep.handOff(l2GovRelay);
+        L2OFTDeployer grossDep = _deploy(RateLimitAccountingType.Gross, _noPausers(), _remotes(DST_EID, _zero()));
 
         vm.startPrank(l2GovRelay);
         LZInit.activateOft({
-            oft:              oft,
-            oftImp:           dep.implementation(),
+            oft:              address(grossDep.oft()),
+            oftImp:           address(grossDep.implementation()),
             remoteEid:        DST_EID,
             cfg:              oftCfg,
             rateLimits:       RateLimits(1 days, 1e18, 1 days, 1e18),
@@ -123,16 +142,12 @@ contract OFTDeployerTest is LZDeployTestBase {
     //  Deployment
     // ==================================
 
-    function test_deployProxyAndImplementation() public view {
-        assertEq(dep.deployer(), deployerEOA);
-        assertEq(dep.endpoint(), ENDPOINT);
-        assertTrue(dep.implementation() != address(0));
-        assertTrue(oft != dep.implementation(), "proxy must not be the implementation");
+    function test_deploysProxyAndImplementation() public view {
+        assertTrue(address(dep.implementation()) != address(0));
+        assertTrue(oft != address(dep.implementation()), "proxy must not be the implementation");
 
-        assertEq(OFTAdapterLike(oft).token(),    USDS);
-        assertEq(OAppLike(oft).endpoint(),       ENDPOINT);
-        assertEq(OFTAdapterLike(oft).owner(),    address(dep), "deployer must own during bring-up");
-        assertEq(EndpointLike(ENDPOINT).delegates(oft), address(dep), "deployer must be the delegate");
+        assertEq(OFTAdapterLike(oft).token(), USDS);
+        assertEq(OAppLike(oft).endpoint(),    ENDPOINT);
 
         assertFalse(OFTAdapterLike(oft).paused());
         assertEq(OFTAdapterLike(oft).msgInspector(), address(0));
@@ -141,19 +156,23 @@ contract OFTDeployerTest is LZDeployTestBase {
 
     /// @dev Only the proxy holds state.
     function test_implementationIsInitializerLocked() public {
-        address impl = dep.implementation();
+        address impl = address(dep.implementation());
 
         vm.expectRevert();
         OFTDeployerInitLike(impl).initialize(address(this));
+    }
+
+    /// @dev Handed over in the same transaction, so the deployer never holds it afterwards.
+    function test_handsOffOwnerAndDelegate() public view {
+        assertEq(OFTAdapterLike(oft).owner(),           l2GovRelay);
+        assertEq(EndpointLike(ENDPOINT).delegates(oft), l2GovRelay);
     }
 
     // ==================================
     //  Wiring
     // ==================================
 
-    function test_wireRemoteConfiguresBothDirections() public {
-        _wire();
-
+    function test_wiresBothDirections() public view {
         assertEq(OAppLike(oft).peers(DST_EID), bytes32(uint256(uint160(remotePeer))));
 
         assertEq(EndpointLike(ENDPOINT).getSendLibrary(oft, DST_EID), SEND_LIB);
@@ -175,132 +194,61 @@ contract OFTDeployerTest is LZDeployTestBase {
         bytes memory expectedOptions = LzOptions.encodeLzReceiveOptions(OPTIONS_GAS);
         assertEq(OFTAdapterLike(oft).enforcedOptions(DST_EID, 1), expectedOptions, "msgType 1 options");
         assertEq(OFTAdapterLike(oft).enforcedOptions(DST_EID, 2), expectedOptions, "msgType 2 options");
-
-        assertTrue(dep.wired());
     }
 
     /// @dev Zero by default: `activateOft` requires it, being where governance turns the bridge on.
-    function test_wireRemoteLeavesRateLimitsZero() public {
-        _wire();
-
+    function test_leavesRateLimitsZero() public view {
         (,, , uint256 outLimit) = OFTAdapterLike(oft).outboundRateLimits(DST_EID);
         (,, , uint256 inLimit)  = OFTAdapterLike(oft).inboundRateLimits(DST_EID);
         assertEq(outLimit, 0);
         assertEq(inLimit,  0);
     }
 
-    function test_wireMultipleRemotes() public {
-        _wire();
+    /// @dev The other model: live at handoff, with no `activateOft` to follow.
+    function test_setsNonZeroRateLimits() public {
+        L2OFTDeployer liveDep = _deploy(
+            RateLimitAccountingType.Net,
+            _noPausers(),
+            _remotes(DST_EID, RateLimits(1 days, 5e18, 1 days, 4e18))
+        );
 
+        (,, , uint256 outLimit) = OFTAdapterLike(address(liveDep.oft())).outboundRateLimits(DST_EID);
+        (,, , uint256 inLimit)  = OFTAdapterLike(address(liveDep.oft())).inboundRateLimits(DST_EID);
+        assertEq(outLimit, 4e18);
+        assertEq(inLimit,  5e18);
+    }
+
+    function test_wiresMultipleRemotes() public {
         uint32 otherEid = 30106; // Avalanche
-        vm.prank(deployerEOA);
-        dep.wireRemote(otherEid, oftCfg, RateLimits(0, 0, 0, 0));
 
-        assertEq(OAppLike(oft).peers(DST_EID),  bytes32(uint256(uint160(remotePeer))));
-        assertEq(OAppLike(oft).peers(otherEid), bytes32(uint256(uint160(remotePeer))));
+        RemoteWiring[] memory remotes = new RemoteWiring[](2);
+        remotes[0] = RemoteWiring(DST_EID,  oftCfg, _zero());
+        remotes[1] = RemoteWiring(otherEid, oftCfg, _zero());
+
+        address multi = address(_deploy(RateLimitAccountingType.Net, _noPausers(), remotes).oft());
+
+        assertEq(OAppLike(multi).peers(DST_EID),  bytes32(uint256(uint160(remotePeer))));
+        assertEq(OAppLike(multi).peers(otherEid), bytes32(uint256(uint160(remotePeer))));
     }
 
-    function test_wireRemoteRevertsOnRewire() public {
-        _wire();
+    function test_revertsOnDuplicateRemote() public {
+        RemoteWiring[] memory remotes = new RemoteWiring[](2);
+        remotes[0] = RemoteWiring(DST_EID, oftCfg, _zero());
+        remotes[1] = RemoteWiring(DST_EID, oftCfg, _zero());
 
-        vm.prank(deployerEOA);
         vm.expectRevert("LZInit/already-wired");
-        dep.wireRemote(DST_EID, oftCfg, RateLimits(0, 0, 0, 0));
+        _deploy(RateLimitAccountingType.Net, _noPausers(), remotes);
     }
 
-    function test_setRateLimitsAndBackToZero() public {
-        _wire();
-
-        vm.prank(deployerEOA);
-        dep.setRateLimits(DST_EID, RateLimits(1 days, 5e18, 1 days, 5e18));
-        (,, , uint256 outLimit) = OFTAdapterLike(oft).outboundRateLimits(DST_EID);
-        assertEq(outLimit, 5e18);
-
-        vm.prank(deployerEOA);
-        dep.setRateLimits(DST_EID, RateLimits(0, 0, 0, 0));
-        (,, , outLimit) = OFTAdapterLike(oft).outboundRateLimits(DST_EID);
-        assertEq(outLimit, 0);
-    }
-
-    function test_setPausers() public {
+    function test_setsPausers() public {
         address breaker = makeAddr("breaker");
 
         address[] memory pausers = new address[](1);
         pausers[0] = breaker;
 
-        vm.prank(deployerEOA);
-        dep.setPausers(pausers, true);
+        address paused = address(_deploy(RateLimitAccountingType.Net, pausers, _remotes(DST_EID, _zero())).oft());
 
-        assertTrue(SkyOFTPauserLike(oft).pausers(breaker));
-    }
-
-    // ==================================
-    //  Handoff
-    // ==================================
-
-    function test_handOffMovesOwnerAndDelegate() public {
-        _wire();
-
-        vm.prank(deployerEOA);
-        dep.handOff(l2GovRelay);
-
-        assertTrue(dep.handedOff());
-        assertEq(OFTAdapterLike(oft).owner(),           l2GovRelay);
-        assertEq(EndpointLike(ENDPOINT).delegates(oft), l2GovRelay);
-    }
-
-    function test_handOffRevertsWithNothingWired() public {
-        vm.prank(deployerEOA);
-        vm.expectRevert("OFTDeployer/nothing-wired");
-        dep.handOff(l2GovRelay);
-    }
-
-    function test_handOffRevertsOnZeroGov() public {
-        _wire();
-
-        vm.prank(deployerEOA);
-        vm.expectRevert("OFTDeployer/gov-is-zero");
-        dep.handOff(address(0));
-    }
-
-    function test_noActionsAfterHandOff() public {
-        _wire();
-        vm.prank(deployerEOA);
-        dep.handOff(l2GovRelay);
-
-        vm.startPrank(deployerEOA);
-
-        vm.expectRevert("OFTDeployer/handed-off");
-        dep.wireRemote(30106, oftCfg, RateLimits(0, 0, 0, 0));
-
-        vm.expectRevert("OFTDeployer/handed-off");
-        dep.handOff(deployerEOA);
-
-        vm.expectRevert("OFTDeployer/handed-off");
-        dep.setRateLimits(DST_EID, RateLimits(0, 0, 0, 0));
-
-        vm.stopPrank();
-    }
-
-    // ==================================
-    //  Access control
-    // ==================================
-
-    function test_onlyDeployerCanWire() public {
-        vm.expectRevert("OFTDeployer/not-deployer");
-        dep.wireRemote(DST_EID, oftCfg, RateLimits(0, 0, 0, 0));
-    }
-
-    function test_onlyDeployerCanHandOff() public {
-        _wire();
-
-        vm.expectRevert("OFTDeployer/not-deployer");
-        dep.handOff(l2GovRelay);
-    }
-
-    function test_onlyDeployerCanSetAccountingType() public {
-        vm.expectRevert("OFTDeployer/not-deployer");
-        dep.setAccountingType(RateLimitAccountingType.Gross);
+        assertTrue(SkyOFTPauserLike(paused).pausers(breaker));
     }
 }
 

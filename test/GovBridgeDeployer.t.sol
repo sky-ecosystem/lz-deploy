@@ -61,8 +61,8 @@ contract GovBridgeDeployerTest is LZDeployTestBase {
             cfg:         recvCfg
         });
 
-        receiver = dep.receiver();
-        relay    = dep.relay();
+        receiver = address(dep.receiver());
+        relay    = address(dep.relay());
     }
 
     // ==================================
@@ -113,18 +113,11 @@ contract GovBridgeDeployerTest is LZDeployTestBase {
         assertEq(r.bud(freezer),        1, "freezer must be budded");
     }
 
-    function test_revertsOnZeroInputs() public {
-        address[] memory bud = new address[](0);
-
-        vm.expectRevert("GovBridgeDeployer/gov-sender-is-zero");
-        new GovBridgeDeployer(ENDPOINT, address(0), L1_GOV_RELAY, DELAY, GRACE_PERIOD, bud, recvCfg);
-
-        vm.expectRevert("GovBridgeDeployer/gov-relay-is-zero");
-        new GovBridgeDeployer(ENDPOINT, GOV_SENDER, address(0), DELAY, GRACE_PERIOD, bud, recvCfg);
-
-        GovRecvConfig memory badCfg = GovRecvConfig({ recvLib: address(0), recvUlnCfg: govUlnCfg });
-        vm.expectRevert("GovBridgeDeployer/recv-lib-is-zero");
-        new GovBridgeDeployer(ENDPOINT, GOV_SENDER, L1_GOV_RELAY, DELAY, GRACE_PERIOD, bud, badCfg);
+    /// @dev The relay's delegatecall target. Stateless and unowned, so existing and knowing its own
+    ///      address (which its `multicall` delegatecalls through) is the whole contract.
+    function test_deploysL2Spell() public view {
+        assertTrue(address(dep.l2Spell()) != address(0));
+        assertEq(dep.l2Spell().SELF(), address(dep.l2Spell()));
     }
 
     /// @dev The relay rejects a grace period too short to execute in.

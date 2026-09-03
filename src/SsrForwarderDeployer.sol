@@ -17,6 +17,9 @@ interface ChainlogLike {
     function getAddress(bytes32) external view returns (address);
 }
 
+/// @dev Kept rather than calling `SSROracleForwarderLZ` directly: its `setEnforcedOptions` takes
+///      LayerZero's `EnforcedOptionParam`, a distinct type from the identically shaped one this repo
+///      builds from lz-init-lib.
 interface ForwarderAdminLike {
     function setPeer(uint32 eid, bytes32 peer) external;
     function setEnforcedOptions(EnforcedOptionParam[] calldata opts) external;
@@ -43,9 +46,6 @@ contract SsrForwarderDeployer {
     address public immutable forwarder;
     uint32  public immutable dstEid;
 
-    bool public configured;
-    bool public handedOff;
-
     event Configured();
     event HandedOff(address indexed gov);
 
@@ -55,7 +55,6 @@ contract SsrForwarderDeployer {
     }
 
     constructor(address susds, address endpoint_, address remoteReceiver, uint32 dstEid_) {
-        require(remoteReceiver != address(0), "SsrForwarderDeployer/receiver-is-zero");
 
         deployer = msg.sender;
         endpoint = endpoint_;
@@ -80,11 +79,6 @@ contract SsrForwarderDeployer {
     ///         `LZComposeReceiver`, so the oracle write happens there. `refresh()` callers then need not
     ///         pass options of their own.
     function configure(ForwarderConfig memory cfg) external onlyDeployer {
-        require(!configured,               "SsrForwarderDeployer/already-configured");
-        require(cfg.peer    != address(0), "SsrForwarderDeployer/peer-is-zero");
-        require(cfg.sendLib != address(0), "SsrForwarderDeployer/send-lib-is-zero");
-
-        configured = true;
 
         ForwarderAdminLike(forwarder).setPeer(dstEid, bytes32(uint256(uint160(cfg.peer))));
 
@@ -106,11 +100,6 @@ contract SsrForwarderDeployer {
     /// @notice Hand the forwarder to MCD_PAUSE_PROXY, as owner and endpoint delegate.
     /// @dev    Irreversible. `activateSsrForwarder` asserts both, so they move together.
     function handOff() external onlyDeployer {
-        require(configured, "SsrForwarderDeployer/not-configured");
-        require(!handedOff, "SsrForwarderDeployer/handed-off");
-
-        handedOff = true;
-
         address pauseProxy = CHAINLOG.getAddress("MCD_PAUSE_PROXY");
 
         ForwarderAdminLike(forwarder).setDelegate(pauseProxy);
