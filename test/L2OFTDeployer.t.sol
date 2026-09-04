@@ -14,7 +14,7 @@ import {
 } from "lz-init-lib/LZInit.sol";
 
 import { L2OFTDeployer, L2OftDeployment, RemoteWiring } from "src/L2OFTDeployer.sol";
-import { LzOptions }                                 from "src/LzOptions.sol";
+import { OptionsBuilder }                            from "@layerzerolabs/oapp-evm/contracts/oapp/libs/OptionsBuilder.sol";
 
 import { LZDeployTestBase } from "./LZDeployTestBase.sol";
 
@@ -23,6 +23,8 @@ import { LZDeployTestBase } from "./LZDeployTestBase.sol";
 /// @dev    `activateOft` re-reads the whole config and reverts on any mismatch, so it passing is the
 ///         real statement of agreement with lz-init-lib. The per-field assertions localise failures.
 contract L2OFTDeployerTest is LZDeployTestBase {
+
+    using OptionsBuilder for bytes;
 
     address l2GovRelay = makeAddr("l2GovRelay");
     address remotePeer = makeAddr("remotePeer");
@@ -191,7 +193,7 @@ contract L2OFTDeployerTest is LZDeployTestBase {
         _assertUlnConfig(abi.encode(UlnLike(SEND_LIB).getAppUlnConfig(oft, DST_EID)), oftSendUlnCfg);
         _assertUlnConfig(abi.encode(UlnLike(RECV_LIB).getAppUlnConfig(oft, DST_EID)), oftRecvUlnCfg);
 
-        bytes memory expectedOptions = LzOptions.encodeLzReceiveOptions(OPTIONS_GAS);
+        bytes memory expectedOptions = OptionsBuilder.newOptions().addExecutorLzReceiveOption(OPTIONS_GAS, 0);
         assertEq(OFTAdapterLike(oft).enforcedOptions(DST_EID, 1), expectedOptions, "msgType 1 options");
         assertEq(OFTAdapterLike(oft).enforcedOptions(DST_EID, 2), expectedOptions, "msgType 2 options");
     }

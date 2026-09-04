@@ -12,7 +12,7 @@ import {
 
 import { SsrRemoteDeployer }    from "src/SsrRemoteDeployer.sol";
 import { SsrForwarderDeployer } from "src/SsrForwarderDeployer.sol";
-import { LzOptions }            from "src/LzOptions.sol";
+import { OptionsBuilder }       from "@layerzerolabs/oapp-evm/contracts/oapp/libs/OptionsBuilder.sol";
 
 import { LZDeployTestBase } from "./LZDeployTestBase.sol";
 
@@ -42,10 +42,14 @@ interface ForwarderLike {
 ///      remote half only touches endpoint and OApp state, which is chain-agnostic.
 contract SsrDeployersTest is LZDeployTestBase {
 
+    using OptionsBuilder for bytes;
+
     uint128 constant FWD_OPTIONS_GAS = 100_000;
     uint128 constant FWD_COMPOSE_GAS = 200_000;
 
     address deployerEOA = makeAddr("deployerEOA");
+    uint256 constant MAX_SSR = 1.00000001e27;
+
     address l2GovRelay  = makeAddr("l2GovRelay");
     address oracleAdmin = makeAddr("oracleAdmin");
 
@@ -77,21 +81,13 @@ contract SsrDeployersTest is LZDeployTestBase {
 
         vm.startPrank(deployerEOA);
 
-        // 1. remote: oracle + adapters
-        remoteDep = new SsrRemoteDeployer(ENDPOINT);
+        // 1. remote: the oracle
+        remoteDep = new SsrRemoteDeployer(MAX_SSR, oracleAdmin);
 
-        // 2. L1: forwarder, pointed at the receiver address the remote deployer will use
-        fwdDep = new SsrForwarderDeployer(SUSDS, ENDPOINT, remoteDep.predictedReceiver(), DST_EID);
-        forwarder = fwdDep.forwarder();
-
-        // 3. remote: receiver, now that the forwarder address is known
-        remoteDep.deployReceiver(forwarder, RECV_LIB, govUlnCfg);
-        receiver = address(remoteDep.receiver());
-
-        vm.stopPrank();
-
+        // 2. L1: forwarder, wired and handed off in its constructor, against the receiver address
+        //    the remote deployer will use
         fwdCfg = ForwarderConfig({
-            peer:         receiver,
+            peer:         remoteDep.predictedReceiver(),
             sendLib:      SEND_LIB,
             execCfg:      execCfg,
             sendUlnCfg:   fwdSendUlnCfg,
@@ -99,13 +95,13 @@ contract SsrDeployersTest is LZDeployTestBase {
             optionsGas:   FWD_OPTIONS_GAS,
             composeGas:   FWD_COMPOSE_GAS
         });
-    }
+        fwdDep    = new SsrForwarderDeployer(DST_EID, fwdCfg);
+        forwarder = address(fwdDep.forwarder());
 
-    function _configureAndHandOff() internal {
-        vm.startPrank(deployerEOA);
-        fwdDep.configure(fwdCfg);
-        fwdDep.handOff();
-        remoteDep.handOff(l2GovRelay, oracleAdmin);
+        // 3. remote: receiver, now that the forwarder address is known, handed off in the same call
+        remoteDep.deployReceiver(ENDPOINT, forwarder, RECV_LIB, govUlnCfg, l2GovRelay);
+        receiver = address(remoteDep.receiver());
+
         vm.stopPrank();
     }
 
@@ -114,10 +110,8 @@ contract SsrDeployersTest is LZDeployTestBase {
     // ==================================
 
     /// @dev With the `NO_CCIP_DVN` sentinel this degrades to pure verification of the forwarder's
-    ///      config — the part this repo produces. The CCIP adapter belongs to lz-gov-dvns-deploy.
+    ///      config — the part this repo produces. The CCIP adapter is deployed outside it.
     function test_activateSsrForwarderAcceptsDeployedState() public {
-        _configureAndHandOff();
-
         vm.startPrank(PAUSE_PROXY);
         LZInit.activateSsrForwarder(forwarder, DST_EID, fwdCfg);
         vm.stopPrank();
@@ -134,8 +128,8 @@ contract SsrDeployersTest is LZDeployTestBase {
 
     function test_receiverCannotBeDeployedTwice() public {
         vm.prank(deployerEOA);
-        vm.expectRevert("SsrRemoteDeployer/receiver-address-mismatch");
-        remoteDep.deployReceiver(forwarder, RECV_LIB, govUlnCfg);
+        vm.expectRevert("SsrRemoteDeployer/receiver-already-deployed");
+        remoteDep.deployReceiver(ENDPOINT, forwarder, RECV_LIB, govUlnCfg, l2GovRelay);
     }
 
     // ==================================
@@ -165,23 +159,12 @@ contract SsrDeployersTest is LZDeployTestBase {
         assertFalse(oracle.hasRole(oracle.DATA_PROVIDER_ROLE(), address(remoteDep)));
     }
 
-    function test_adaptersPointAtTheOracle() public view {
-        assertTrue(address(remoteDep.balancerAdapter())  != address(0));
-        assertTrue(address(remoteDep.chainlinkAdapter()) != address(0));
-        assertEq(address(remoteDep.balancerAdapter().ssrOracle()),  address(remoteDep.oracle()));
-        assertEq(address(remoteDep.chainlinkAdapter().ssrOracle()), address(remoteDep.oracle()));
+
+    function test_maxSSRSetAtConstruction() public view {
+        assertEq(OracleLike(address(remoteDep.oracle())).maxSSR(), MAX_SSR);
     }
 
-    function test_setMaxSSR() public {
-        vm.prank(deployerEOA);
-        remoteDep.setMaxSSR(1.00000001e27);
-
-        assertEq(OracleLike(address(remoteDep.oracle())).maxSSR(), 1.00000001e27);
-    }
-
-    function test_remoteHandOffMovesReceiverAndOracleAdmin() public {
-        _configureAndHandOff();
-
+    function test_handOffMovesReceiverAndOracleAdmin() public view {
         OracleLike oracle = OracleLike(address(remoteDep.oracle()));
 
         assertEq(ReceiverLike(receiver).owner(),             l2GovRelay);
@@ -193,19 +176,13 @@ contract SsrDeployersTest is LZDeployTestBase {
 
     /// @dev No admin freezes `DATA_PROVIDER_ROLE` and `maxSSR` for good. Deliberate; asserted so it
     ///      cannot regress silently.
-    function test_remoteHandOffWithoutAdminLeavesNoAdmin() public {
-        vm.startPrank(deployerEOA);
-        fwdDep.configure(fwdCfg);
-        remoteDep.handOff(l2GovRelay, address(0));
-        vm.stopPrank();
-
-        OracleLike oracle = OracleLike(address(remoteDep.oracle()));
-        assertFalse(oracle.hasRole(oracle.DEFAULT_ADMIN_ROLE(), address(remoteDep)));
-        assertFalse(oracle.hasRole(oracle.DEFAULT_ADMIN_ROLE(), l2GovRelay));
-
+    function test_zeroOracleAdminLeavesNoAdmin() public {
         vm.prank(deployerEOA);
-        vm.expectRevert();
-        remoteDep.setMaxSSR(1e27);
+        SsrRemoteDeployer dep = new SsrRemoteDeployer(MAX_SSR, address(0));
+
+        OracleLike oracle = OracleLike(address(dep.oracle()));
+        assertFalse(oracle.hasRole(oracle.DEFAULT_ADMIN_ROLE(), address(dep)));
+        assertFalse(oracle.hasRole(oracle.DEFAULT_ADMIN_ROLE(), l2GovRelay));
     }
 
     // ==================================
@@ -220,10 +197,7 @@ contract SsrDeployersTest is LZDeployTestBase {
         assertEq(OAppLike(forwarder).endpoint(), ENDPOINT);
     }
 
-    function test_forwarderSendSideConfig() public {
-        vm.prank(deployerEOA);
-        fwdDep.configure(fwdCfg);
-
+    function test_forwarderSendSideConfig() public view {
         assertEq(OAppLike(forwarder).peers(DST_EID), bytes32(uint256(uint160(receiver))));
 
         assertEq(EndpointLike(ENDPOINT).getSendLibrary(forwarder, DST_EID), SEND_LIB);
@@ -240,13 +214,13 @@ contract SsrDeployersTest is LZDeployTestBase {
         // options have to pay for it rather than leaving it to each refresh() caller.
         assertEq(
             ForwarderLike(forwarder).enforcedOptions(DST_EID, 1),
-            LzOptions.encodeLzReceiveAndComposeOptions(FWD_OPTIONS_GAS, FWD_COMPOSE_GAS)
+            OptionsBuilder.newOptions()
+                .addExecutorLzReceiveOption(FWD_OPTIONS_GAS, 0)
+                .addExecutorLzComposeOption(0, FWD_COMPOSE_GAS, 0)
         );
     }
 
-    function test_forwarderHandedToPauseProxy() public {
-        _configureAndHandOff();
-
+    function test_forwarderHandedToPauseProxy() public view {
         assertEq(ForwarderLike(forwarder).owner(),            PAUSE_PROXY);
         assertEq(EndpointLike(ENDPOINT).delegates(forwarder), PAUSE_PROXY);
     }
@@ -255,19 +229,9 @@ contract SsrDeployersTest is LZDeployTestBase {
     //  Access control
     // ==================================
 
-    function test_onlyDeployerCanDriveRemote() public {
+
+    function test_onlyDeployerCanDeployTheReceiver() public {
         vm.expectRevert("SsrRemoteDeployer/not-deployer");
-        remoteDep.handOff(l2GovRelay, oracleAdmin);
-
-        vm.expectRevert("SsrRemoteDeployer/not-deployer");
-        remoteDep.setMaxSSR(1e27);
-    }
-
-    function test_onlyDeployerCanDriveForwarder() public {
-        vm.expectRevert("SsrForwarderDeployer/not-deployer");
-        fwdDep.configure(fwdCfg);
-
-        vm.expectRevert("SsrForwarderDeployer/not-deployer");
-        fwdDep.handOff();
+        remoteDep.deployReceiver(ENDPOINT, forwarder, RECV_LIB, govUlnCfg, l2GovRelay);
     }
 }

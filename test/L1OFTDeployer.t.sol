@@ -18,11 +18,10 @@ import { LZDeployTestBase } from "./LZDeployTestBase.sol";
 
 /// @notice Acceptance test for `L1OFTDeployer`: deploy the lockbox as the deployer would, then run
 ///         the governance-side check that gates the spell.
-/// @dev    Covers what a lockbox has and a satellite does not — the global (sentinel) cap and its
+/// @dev    Covers what a lockbox has and an L2 adapter does not — the global (sentinel) cap and its
 ///         own accounting type. The shared wiring assertions live in `L2OFTDeployer.t.sol`.
 contract L1OFTDeployerTest is LZDeployTestBase {
 
-    address pauseProxy = makeAddr("pauseProxy");
     address remotePeer = makeAddr("remotePeer");
 
     L1OFTDeployer dep;
@@ -60,13 +59,11 @@ contract L1OFTDeployerTest is LZDeployTestBase {
 
         return new L1OFTDeployer(L1OftDeployment({
             token:                   USDS,
-            endpoint:                ENDPOINT,
             accountingType:          accountingType,
             aggregateAccountingType: aggregateAccountingType,
             globalLimits:            limits,
             pausers:                 new address[](0),
-            remotes:                 remotes,
-            gov:                     pauseProxy
+            remotes:                 remotes
         }));
     }
 
@@ -78,7 +75,7 @@ contract L1OFTDeployerTest is LZDeployTestBase {
         RateLimits memory perEid = RateLimits(1 days, 5_000_000e18, 1 days, 4_000_000e18);
 
         // `startPrank`, not `prank`: the library call is inlined here and makes many external calls.
-        vm.startPrank(pauseProxy);
+        vm.startPrank(PAUSE_PROXY);
         LZInit.activateOft({
             oft:              oft,
             oftImp:           address(dep.implementation()),
@@ -87,7 +84,7 @@ contract L1OFTDeployerTest is LZDeployTestBase {
             rateLimits:       perEid,
             rlAccountingType: uint8(RateLimitAccountingType.Net),
             token:            USDS,
-            owner:            pauseProxy,
+            owner:            PAUSE_PROXY,
             endpoint:         ENDPOINT
         });
         vm.stopPrank();
@@ -136,8 +133,8 @@ contract L1OFTDeployerTest is LZDeployTestBase {
         assertEq(OFTAdapterLike(oft).token(), USDS);
         assertEq(OAppLike(oft).endpoint(),    ENDPOINT);
 
-        assertEq(OFTAdapterLike(oft).owner(),           pauseProxy);
-        assertEq(EndpointLike(ENDPOINT).delegates(oft), pauseProxy);
+        assertEq(OFTAdapterLike(oft).owner(),           PAUSE_PROXY);
+        assertEq(EndpointLike(ENDPOINT).delegates(oft), PAUSE_PROXY);
     }
 }
 

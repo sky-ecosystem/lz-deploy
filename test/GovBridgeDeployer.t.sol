@@ -53,8 +53,6 @@ contract GovBridgeDeployerTest is LZDeployTestBase {
         vm.prank(deployerEOA);
         dep = new GovBridgeDeployer({
             endpoint:    ENDPOINT,
-            l1GovSender: GOV_SENDER,
-            l1GovRelay:  L1_GOV_RELAY,
             delay:       DELAY,
             gracePeriod: GRACE_PERIOD,
             bud:         bud,
@@ -62,7 +60,7 @@ contract GovBridgeDeployerTest is LZDeployTestBase {
         });
 
         receiver = address(dep.receiver());
-        relay    = address(dep.relay());
+        relay    = dep.relay();
     }
 
     // ==================================
@@ -113,17 +111,10 @@ contract GovBridgeDeployerTest is LZDeployTestBase {
         assertEq(r.bud(freezer),        1, "freezer must be budded");
     }
 
-    /// @dev The relay's delegatecall target. Stateless and unowned, so existing and knowing its own
-    ///      address (which its `multicall` delegatecalls through) is the whole contract.
-    function test_deploysL2Spell() public view {
-        assertTrue(address(dep.l2Spell()) != address(0));
-        assertEq(dep.l2Spell().SELF(), address(dep.l2Spell()));
-    }
-
     /// @dev The relay rejects a grace period too short to execute in.
     function test_revertsOnShortGracePeriod() public {
         vm.expectRevert("L2GovernanceRelay/grace-period-too-short");
-        new GovBridgeDeployer(ENDPOINT, GOV_SENDER, L1_GOV_RELAY, DELAY, 1 minutes, new address[](0), recvCfg);
+        new GovBridgeDeployer(ENDPOINT, DELAY, 1 minutes, new address[](0), recvCfg);
     }
 
     // ==================================
@@ -132,7 +123,7 @@ contract GovBridgeDeployerTest is LZDeployTestBase {
 
     /// @dev `wireGovPeer` completes the bridge and consumes both addresses this deployer produces:
     ///      the receiver as peer, the relay as the whitelisted target. `NO_CCIP_DVN` skips the shared
-    ///      CCIP adapter's route check — routing it is lz-gov-dvns-deploy's job.
+    ///      CCIP adapter's route check, which is configured outside this repo.
     function test_wireGovPeerAcceptsDeployedReceiver() public {
         GovConfig memory cfg = GovConfig({
             peer:         receiver,

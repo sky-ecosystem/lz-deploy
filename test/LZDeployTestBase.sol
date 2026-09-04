@@ -3,20 +3,14 @@ pragma solidity ^0.8.24;
 
 import "forge-std/Test.sol";
 
-import { UlnConfig, ExecutorConfig } from "lz-init-lib/LZInit.sol";
-
-interface ChainlogReadLike {
-    function getAddress(bytes32) external view returns (address);
-}
+import { LZInit, UlnConfig, ExecutorConfig } from "lz-init-lib/LZInit.sol";
 
 /// @notice Shared mainnet-fork setup for the deployer tests.
 /// @dev    The remote-side deployers are exercised on a mainnet fork too: what they configure is
 ///         endpoint and OApp state, which is chain-agnostic, and their L2-specific inputs (token,
-///         relay, DVN set) are parameters. Constants match lz-init-lib's test fixtures:
+///         relay, DVN set) are parameters. The constants below are the live mainnet deployments:
 ///         https://docs.layerzero.network/v2/deployments/deployed-contracts
 abstract contract LZDeployTestBase is Test {
-
-    ChainlogReadLike constant chainlog = ChainlogReadLike(0xdA0Ab1e0017DEbCd72Be8599041a2aa3bA7e740F);
 
     address constant ENDPOINT = 0x1a44076050125825900e736c501f859c50fE728c;
     address constant SEND_LIB = 0xbB2Ea70C9E858123480642Cf96acbcCE1372dCe1; // SendUln302
@@ -49,17 +43,18 @@ abstract contract LZDeployTestBase is Test {
     UlnConfig      govUlnCfg;
 
     function setUp() public virtual {
-        // Same pin as lz-init-lib's tests, so runs are reproducible; needs an archive RPC.
-        // `FORK_BLOCK=0` runs against the latest block instead, for a non-archive RPC.
+        // Pinned so the live references read below cannot shift underneath the suite; needs an
+        // archive RPC. `FORK_BLOCK=<recent block>` works on a non-archive one; `0` uses the latest,
+        // which can race the tip.
         uint256 forkBlock = vm.envOr("FORK_BLOCK", uint256(24871363));
         if (forkBlock == 0) vm.createSelectFork(getChain("mainnet").rpcUrl);
         else                vm.createSelectFork(getChain("mainnet").rpcUrl, forkBlock);
 
-        PAUSE_PROXY  = chainlog.getAddress("MCD_PAUSE_PROXY");
-        GOV_SENDER   = chainlog.getAddress("LZ_GOV_SENDER");
-        L1_GOV_RELAY = chainlog.getAddress("LZ_GOV_RELAY");
-        USDS         = chainlog.getAddress("USDS");
-        SUSDS        = chainlog.getAddress("SUSDS");
+        PAUSE_PROXY  = LZInit.chainlog.getAddress("MCD_PAUSE_PROXY");
+        GOV_SENDER   = LZInit.chainlog.getAddress("LZ_GOV_SENDER");
+        L1_GOV_RELAY = LZInit.chainlog.getAddress("LZ_GOV_RELAY");
+        USDS         = LZInit.chainlog.getAddress("USDS");
+        SUSDS        = LZInit.chainlog.getAddress("SUSDS");
 
         execCfg = ExecutorConfig({ maxMessageSize: 10000, executor: EXECUTOR });
 
