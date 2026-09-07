@@ -8,8 +8,7 @@ import { LZInit, UlnConfig, ExecutorConfig } from "lz-init-lib/LZInit.sol";
 /// @notice Shared mainnet-fork setup for the deployer tests.
 /// @dev    The remote-side deployers are exercised on a mainnet fork too: what they configure is
 ///         endpoint and OApp state, which is chain-agnostic, and their L2-specific inputs (token,
-///         relay, DVN set) are parameters. The constants below are the live mainnet deployments:
-///         https://docs.layerzero.network/v2/deployments/deployed-contracts
+///         relay, DVN set) are parameters. The constants below are the live mainnet deployments.
 abstract contract LZDeployTestBase is Test {
 
     address constant ENDPOINT = 0x1a44076050125825900e736c501f859c50fE728c;
@@ -56,7 +55,7 @@ abstract contract LZDeployTestBase is Test {
         USDS         = LZInit.chainlog.getAddress("USDS");
         SUSDS        = LZInit.chainlog.getAddress("SUSDS");
 
-        execCfg = ExecutorConfig({ maxMessageSize: 10000, executor: EXECUTOR });
+        execCfg = ExecutorConfig({ maxMessageSize: 10_000, executor: EXECUTOR });
 
         // OFT routes: 2-of-2 required DVNs, matching production.
         address[] memory oftRequiredDVNs = new address[](2);

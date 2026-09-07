@@ -53,7 +53,8 @@ src/SsrRemoteDeployer.sol        remote:    SSRAuthOracle + LZComposeReceiver
 4. `L2OFTDeployer`, one per token — deploys and wires an adapter; `rely` it on its token afterwards.
 5. `LZL2Spell` — stateless and unowned, so no deployer owns it; its address is what a spell passes to
    `relayToL2`.
-6. The L1 spell — `wireGovPeer`, `wireOftPeer`, `activateOft`.
+6. The L1 spell — `LZDVNInit.wireCCIPDVN` for the new chain's route on the shared CCIP DVN adapter,
+   then `wireGovPeer`, `wireOftPeer` and `activateOft`.
 
 ### An SSR bridge
 

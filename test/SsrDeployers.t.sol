@@ -46,10 +46,9 @@ contract SsrDeployersTest is LZDeployTestBase {
 
     uint128 constant FWD_OPTIONS_GAS = 100_000;
     uint128 constant FWD_COMPOSE_GAS = 200_000;
+    uint256 constant MAX_SSR         = 1.00000001e27;
 
     address deployerEOA = makeAddr("deployerEOA");
-    uint256 constant MAX_SSR = 1.00000001e27;
-
     address l2GovRelay  = makeAddr("l2GovRelay");
     address oracleAdmin = makeAddr("oracleAdmin");
 
@@ -159,7 +158,6 @@ contract SsrDeployersTest is LZDeployTestBase {
         assertFalse(oracle.hasRole(oracle.DATA_PROVIDER_ROLE(), address(remoteDep)));
     }
 
-
     function test_maxSSRSetAtConstruction() public view {
         assertEq(OracleLike(address(remoteDep.oracle())).maxSSR(), MAX_SSR);
     }
@@ -228,7 +226,6 @@ contract SsrDeployersTest is LZDeployTestBase {
     // ==================================
     //  Access control
     // ==================================
-
 
     function test_onlyDeployerCanDeployTheReceiver() public {
         vm.expectRevert("SsrRemoteDeployer/not-deployer");

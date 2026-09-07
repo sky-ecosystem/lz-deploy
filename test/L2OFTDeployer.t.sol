@@ -14,9 +14,17 @@ import {
 } from "lz-init-lib/LZInit.sol";
 
 import { L2OFTDeployer, L2OftDeployment, RemoteWiring } from "src/L2OFTDeployer.sol";
-import { OptionsBuilder }                            from "@layerzerolabs/oapp-evm/contracts/oapp/libs/OptionsBuilder.sol";
+import { OptionsBuilder }                              from "@layerzerolabs/oapp-evm/contracts/oapp/libs/OptionsBuilder.sol";
 
 import { LZDeployTestBase } from "./LZDeployTestBase.sol";
+
+interface OFTDeployerInitLike {
+    function initialize(address delegate) external;
+}
+
+interface SkyOFTPauserLike {
+    function pausers(address pauser) external view returns (bool);
+}
 
 /// @notice Acceptance test for `L2OFTDeployer`: deploy as the deployer would, then run the
 ///         governance-side function the spell itself calls.
@@ -30,7 +38,7 @@ contract L2OFTDeployerTest is LZDeployTestBase {
     address remotePeer = makeAddr("remotePeer");
 
     L2OFTDeployer dep;
-    address     oft;
+    address       oft;
 
     OftConfig oftCfg;
 
@@ -115,8 +123,8 @@ contract L2OFTDeployerTest is LZDeployTestBase {
         });
         vm.stopPrank();
 
-        (,, , uint256 outLimit) = OFTAdapterLike(oft).outboundRateLimits(DST_EID);
-        (,, , uint256 inLimit)  = OFTAdapterLike(oft).inboundRateLimits(DST_EID);
+        (,,, uint256 outLimit) = OFTAdapterLike(oft).outboundRateLimits(DST_EID);
+        (,,, uint256 inLimit)  = OFTAdapterLike(oft).inboundRateLimits(DST_EID);
         assertEq(outLimit, limits.outboundLimit, "outbound limit not activated");
         assertEq(inLimit,  limits.inboundLimit,  "inbound limit not activated");
     }
@@ -170,6 +178,17 @@ contract L2OFTDeployerTest is LZDeployTestBase {
         assertEq(EndpointLike(ENDPOINT).delegates(oft), l2GovRelay);
     }
 
+    function test_setsPausers() public {
+        address breaker = makeAddr("breaker");
+
+        address[] memory pausers = new address[](1);
+        pausers[0] = breaker;
+
+        address paused = address(_deploy(RateLimitAccountingType.Net, pausers, _remotes(DST_EID, _zero())).oft());
+
+        assertTrue(SkyOFTPauserLike(paused).pausers(breaker));
+    }
+
     // ==================================
     //  Wiring
     // ==================================
@@ -200,8 +219,8 @@ contract L2OFTDeployerTest is LZDeployTestBase {
 
     /// @dev Zero by default: `activateOft` requires it, being where governance turns the bridge on.
     function test_leavesRateLimitsZero() public view {
-        (,, , uint256 outLimit) = OFTAdapterLike(oft).outboundRateLimits(DST_EID);
-        (,, , uint256 inLimit)  = OFTAdapterLike(oft).inboundRateLimits(DST_EID);
+        (,,, uint256 outLimit) = OFTAdapterLike(oft).outboundRateLimits(DST_EID);
+        (,,, uint256 inLimit)  = OFTAdapterLike(oft).inboundRateLimits(DST_EID);
         assertEq(outLimit, 0);
         assertEq(inLimit,  0);
     }
@@ -214,8 +233,8 @@ contract L2OFTDeployerTest is LZDeployTestBase {
             _remotes(DST_EID, RateLimits(1 days, 5e18, 1 days, 4e18))
         );
 
-        (,, , uint256 outLimit) = OFTAdapterLike(address(liveDep.oft())).outboundRateLimits(DST_EID);
-        (,, , uint256 inLimit)  = OFTAdapterLike(address(liveDep.oft())).inboundRateLimits(DST_EID);
+        (,,, uint256 outLimit) = OFTAdapterLike(address(liveDep.oft())).outboundRateLimits(DST_EID);
+        (,,, uint256 inLimit)  = OFTAdapterLike(address(liveDep.oft())).inboundRateLimits(DST_EID);
         assertEq(outLimit, 4e18);
         assertEq(inLimit,  5e18);
     }
@@ -241,23 +260,4 @@ contract L2OFTDeployerTest is LZDeployTestBase {
         vm.expectRevert("LZInit/already-wired");
         _deploy(RateLimitAccountingType.Net, _noPausers(), remotes);
     }
-
-    function test_setsPausers() public {
-        address breaker = makeAddr("breaker");
-
-        address[] memory pausers = new address[](1);
-        pausers[0] = breaker;
-
-        address paused = address(_deploy(RateLimitAccountingType.Net, pausers, _remotes(DST_EID, _zero())).oft());
-
-        assertTrue(SkyOFTPauserLike(paused).pausers(breaker));
-    }
-}
-
-interface OFTDeployerInitLike {
-    function initialize(address delegate) external;
-}
-
-interface SkyOFTPauserLike {
-    function pausers(address pauser) external view returns (bool);
 }

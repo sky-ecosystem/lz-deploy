@@ -16,6 +16,10 @@ import { L1OFTDeployer, L1OftDeployment, RemoteWiring } from "src/L1OFTDeployer.
 
 import { LZDeployTestBase } from "./LZDeployTestBase.sol";
 
+interface SkyLockboxLike {
+    function aggregateRateLimitAccountingType() external view returns (uint8);
+}
+
 /// @notice Acceptance test for `L1OFTDeployer`: deploy the lockbox as the deployer would, then run
 ///         the governance-side function the spell itself calls.
 /// @dev    Covers what a lockbox has and an L2 adapter does not — the global (sentinel) cap and its
@@ -89,8 +93,22 @@ contract L1OFTDeployerTest is LZDeployTestBase {
         });
         vm.stopPrank();
 
-        (,, , uint256 outLimit) = OFTAdapterLike(oft).outboundRateLimits(DST_EID);
+        (,,, uint256 outLimit) = OFTAdapterLike(oft).outboundRateLimits(DST_EID);
         assertEq(outLimit, perEid.outboundLimit, "per-eid limit not activated");
+    }
+
+    // ==================================
+    //  Deployment
+    // ==================================
+
+    function test_deploysProxyAndHandsOff() public view {
+        assertTrue(oft != address(dep.implementation()), "proxy must not be the implementation");
+
+        assertEq(OFTAdapterLike(oft).token(), USDS);
+        assertEq(OAppLike(oft).endpoint(),    ENDPOINT);
+
+        assertEq(OFTAdapterLike(oft).owner(),           PAUSE_PROXY);
+        assertEq(EndpointLike(ENDPOINT).delegates(oft), PAUSE_PROXY);
     }
 
     // ==================================
@@ -119,25 +137,7 @@ contract L1OFTDeployerTest is LZDeployTestBase {
             RateLimitAccountingType.Net, RateLimitAccountingType.Net, RateLimits(0, 0, 0, 0)
         ).oft());
 
-        (,, , uint256 outLimit) = OFTAdapterLike(zeroCap).outboundRateLimits(sentinel);
+        (,,, uint256 outLimit) = OFTAdapterLike(zeroCap).outboundRateLimits(sentinel);
         assertEq(outLimit, 0);
     }
-
-    // ==================================
-    //  Deployment
-    // ==================================
-
-    function test_deploysProxyAndHandsOff() public view {
-        assertTrue(oft != address(dep.implementation()), "proxy must not be the implementation");
-
-        assertEq(OFTAdapterLike(oft).token(), USDS);
-        assertEq(OAppLike(oft).endpoint(),    ENDPOINT);
-
-        assertEq(OFTAdapterLike(oft).owner(),           PAUSE_PROXY);
-        assertEq(EndpointLike(ENDPOINT).delegates(oft), PAUSE_PROXY);
-    }
-}
-
-interface SkyLockboxLike {
-    function aggregateRateLimitAccountingType() external view returns (uint8);
 }

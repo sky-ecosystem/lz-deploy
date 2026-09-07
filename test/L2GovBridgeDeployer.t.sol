@@ -26,6 +26,10 @@ interface OwnableLike {
     function owner() external view returns (address);
 }
 
+interface GovSenderLike {
+    function canCallTarget(address srcSender, uint32 dstEid, bytes32 dstTarget) external view returns (bool);
+}
+
 /// @dev The remote half of the governance bridge, run against a mainnet fork. Its peer is the real
 ///      chainlog `LZ_GOV_SENDER`, which lets the last test drive `wireGovPeer` against it.
 contract L2GovBridgeDeployerTest is LZDeployTestBase {
@@ -63,6 +67,34 @@ contract L2GovBridgeDeployerTest is LZDeployTestBase {
 
         receiver = address(dep.receiver());
         relay    = dep.relay();
+    }
+
+    // ==================================
+    //  Acceptance: the L1 spell half accepts these outputs
+    // ==================================
+
+    /// @dev `wireGovPeer` completes the bridge and consumes both addresses this deployer produces:
+    ///      the receiver as peer, the relay as the whitelisted target. `NO_CCIP_DVN` skips the shared
+    ///      CCIP adapter's route check, which is configured outside this repo.
+    function test_wireGovPeerAcceptsDeployedReceiver() public {
+        GovConfig memory cfg = GovConfig({
+            peer:         receiver,
+            sendLib:      SEND_LIB,
+            execCfg:      execCfg,
+            sendUlnCfg:   govUlnCfg,
+            ccipDvnIndex: type(uint256).max, // LZInit.NO_CCIP_DVN
+            l2GovRelay:   relay
+        });
+
+        vm.startPrank(PAUSE_PROXY);
+        LZInit.wireGovPeer(DST_EID, cfg);
+        vm.stopPrank();
+
+        assertEq(OAppLike(GOV_SENDER).peers(DST_EID), bytes32(uint256(uint160(receiver))));
+        assertTrue(
+            GovSenderLike(GOV_SENDER).canCallTarget(L1_GOV_RELAY, DST_EID, bytes32(uint256(uint160(relay)))),
+            "L1 relay must be whitelisted to call the L2 relay"
+        );
     }
 
     // ==================================
@@ -118,36 +150,4 @@ contract L2GovBridgeDeployerTest is LZDeployTestBase {
         vm.expectRevert("L2GovernanceRelay/grace-period-too-short");
         new L2GovBridgeDeployer(ENDPOINT, GOV_SENDER, L1_GOV_RELAY, DELAY, 1 minutes, new address[](0), recvCfg);
     }
-
-    // ==================================
-    //  Acceptance: the L1 spell half accepts these outputs
-    // ==================================
-
-    /// @dev `wireGovPeer` completes the bridge and consumes both addresses this deployer produces:
-    ///      the receiver as peer, the relay as the whitelisted target. `NO_CCIP_DVN` skips the shared
-    ///      CCIP adapter's route check, which is configured outside this repo.
-    function test_wireGovPeerAcceptsDeployedReceiver() public {
-        GovConfig memory cfg = GovConfig({
-            peer:         receiver,
-            sendLib:      SEND_LIB,
-            execCfg:      execCfg,
-            sendUlnCfg:   govUlnCfg,
-            ccipDvnIndex: type(uint256).max, // LZInit.NO_CCIP_DVN
-            l2GovRelay:   relay
-        });
-
-        vm.startPrank(PAUSE_PROXY);
-        LZInit.wireGovPeer(DST_EID, cfg);
-        vm.stopPrank();
-
-        assertEq(OAppLike(GOV_SENDER).peers(DST_EID), bytes32(uint256(uint160(receiver))));
-        assertTrue(
-            GovSenderLike(GOV_SENDER).canCallTarget(L1_GOV_RELAY, DST_EID, bytes32(uint256(uint160(relay)))),
-            "L1 relay must be whitelisted to call the L2 relay"
-        );
-    }
-}
-
-interface GovSenderLike {
-    function canCallTarget(address srcSender, uint32 dstEid, bytes32 dstTarget) external view returns (bool);
 }
