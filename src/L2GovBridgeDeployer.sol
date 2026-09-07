@@ -13,18 +13,21 @@ struct GovRecvConfig {
 
 /// @notice Deploys a new chain's half of the Sky LZ governance bridge: the `GovernanceOAppReceiver`
 ///         and the `L2GovernanceRelay` that executes its messages behind a delay.
-contract GovBridgeDeployer {
+contract L2GovBridgeDeployer {
 
-    uint32  internal constant ETH_EID       = 30101;
-    address internal constant L1_GOV_SENDER = 0x27FC1DD771817b53bE48Dc28789533BEa53C9CCA; // chainlog LZ_GOV_SENDER
-    address internal constant L1_GOV_RELAY  = 0x2beBFe397D497b66cB14461cB6ee467b4C3B7D61; // chainlog LZ_GOV_RELAY
+    uint32 internal constant ETH_EID = 30101;
 
     GovernanceOAppReceiver public immutable receiver;
     address                public immutable relay;
 
-    /// @param bud Addresses allowed to cancel queued actions.
+    /// @param l1GovSender The L1 `GovernanceOAppSender` (chainlog `LZ_GOV_SENDER`), the receiver's peer.
+    /// @param l1GovRelay  The L1 `L1GovernanceRelay` (chainlog `LZ_GOV_RELAY`), the only sender whose
+    ///                    messages this relay executes.
+    /// @param bud         Addresses allowed to cancel queued actions.
     constructor(
         address              endpoint,
+        address              l1GovSender,
+        address              l1GovRelay,
         uint256              delay,
         uint256              gracePeriod,
         address[]     memory bud,
@@ -32,7 +35,7 @@ contract GovBridgeDeployer {
     ) {
         receiver = new GovernanceOAppReceiver({
             _governanceOAppSenderEid:     ETH_EID,
-            _governanceOAppSenderAddress: bytes32(uint256(uint160(L1_GOV_SENDER))),
+            _governanceOAppSenderAddress: bytes32(uint256(uint160(l1GovSender))),
             _endpoint:                    endpoint,
             _owner:                       address(this)
         });
@@ -40,7 +43,7 @@ contract GovBridgeDeployer {
         relay = GovernanceRelayDeploy.deployL2({
             l1Eid:             ETH_EID,
             l2Oapp:            address(receiver),
-            l1GovernanceRelay: L1_GOV_RELAY,
+            l1GovernanceRelay: l1GovRelay,
             delay:             delay,
             gracePeriod:       gracePeriod,
             bud:               bud

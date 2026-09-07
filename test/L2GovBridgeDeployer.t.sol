@@ -9,7 +9,7 @@ import {
     OAppLike
 } from "lz-init-lib/LZInit.sol";
 
-import { GovBridgeDeployer, GovRecvConfig } from "src/GovBridgeDeployer.sol";
+import { L2GovBridgeDeployer, GovRecvConfig } from "src/L2GovBridgeDeployer.sol";
 
 import { LZDeployTestBase } from "./LZDeployTestBase.sol";
 
@@ -28,7 +28,7 @@ interface OwnableLike {
 
 /// @dev The remote half of the governance bridge, run against a mainnet fork. Its peer is the real
 ///      chainlog `LZ_GOV_SENDER`, which lets the last test drive `wireGovPeer` against it.
-contract GovBridgeDeployerTest is LZDeployTestBase {
+contract L2GovBridgeDeployerTest is LZDeployTestBase {
 
     address deployerEOA = makeAddr("deployerEOA");
     address freezer     = makeAddr("freezer");
@@ -36,7 +36,7 @@ contract GovBridgeDeployerTest is LZDeployTestBase {
     uint256 constant DELAY        = 2 days;
     uint256 constant GRACE_PERIOD = 30 days;
 
-    GovBridgeDeployer dep;
+    L2GovBridgeDeployer dep;
     address           receiver;
     address           relay;
 
@@ -51,8 +51,10 @@ contract GovBridgeDeployerTest is LZDeployTestBase {
         bud[0] = freezer;
 
         vm.prank(deployerEOA);
-        dep = new GovBridgeDeployer({
+        dep = new L2GovBridgeDeployer({
             endpoint:    ENDPOINT,
+            l1GovSender: GOV_SENDER,
+            l1GovRelay:  L1_GOV_RELAY,
             delay:       DELAY,
             gracePeriod: GRACE_PERIOD,
             bud:         bud,
@@ -114,7 +116,7 @@ contract GovBridgeDeployerTest is LZDeployTestBase {
     /// @dev The relay rejects a grace period too short to execute in.
     function test_revertsOnShortGracePeriod() public {
         vm.expectRevert("L2GovernanceRelay/grace-period-too-short");
-        new GovBridgeDeployer(ENDPOINT, DELAY, 1 minutes, new address[](0), recvCfg);
+        new L2GovBridgeDeployer(ENDPOINT, GOV_SENDER, L1_GOV_RELAY, DELAY, 1 minutes, new address[](0), recvCfg);
     }
 
     // ==================================

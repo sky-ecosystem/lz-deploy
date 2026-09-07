@@ -17,7 +17,7 @@ import { L1OFTDeployer, L1OftDeployment, RemoteWiring } from "src/L1OFTDeployer.
 import { LZDeployTestBase } from "./LZDeployTestBase.sol";
 
 /// @notice Acceptance test for `L1OFTDeployer`: deploy the lockbox as the deployer would, then run
-///         the governance-side check that gates the spell.
+///         the governance-side function the spell itself calls.
 /// @dev    Covers what a lockbox has and an L2 adapter does not — the global (sentinel) cap and its
 ///         own accounting type. The shared wiring assertions live in `L2OFTDeployer.t.sol`.
 contract L1OFTDeployerTest is LZDeployTestBase {

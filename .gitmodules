@@ -16,10 +16,3 @@
 [submodule "lib/xchain-ssr-oracle"]
 	path = lib/xchain-ssr-oracle
 	url = git@github.com:sky-ecosystem/xchain-ssr-oracle
-[submodule "lib/usds"]
-	path = lib/usds
-	url = https://github.com/sky-ecosystem/usds
-[submodule "lib/sdai"]
-	path = lib/sdai
-	url = https://github.com/sky-ecosystem/sdai
-	branch = susds

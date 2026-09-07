@@ -19,7 +19,7 @@ import { OptionsBuilder }                            from "@layerzerolabs/oapp-e
 import { LZDeployTestBase } from "./LZDeployTestBase.sol";
 
 /// @notice Acceptance test for `L2OFTDeployer`: deploy as the deployer would, then run the
-///         governance-side check that gates the spell.
+///         governance-side function the spell itself calls.
 /// @dev    `activateOft` re-reads the whole config and reverts on any mismatch, so it passing is the
 ///         real statement of agreement with lz-init-lib. The per-field assertions localise failures.
 contract L2OFTDeployerTest is LZDeployTestBase {

@@ -35,14 +35,11 @@ Out of scope, by design:
 ## Layout
 
 ```
-src/L1OFTDeployer.sol             mainnet:   SkyOFTAdapter proxy, wired and handed to the pause proxy
-src/L2OFTDeployer.sol             new chain: SkyOFTAdapterMintBurn proxy, wired and handed to the relay
-src/GovBridgeDeployer.sol         new chain: GovernanceOAppReceiver + L2GovernanceRelay
-src/SsrForwarderDeployer.sol      mainnet:   SSROracleForwarderLZ
-src/SsrRemoteDeployer.sol         remote:    SSRAuthOracle + LZComposeReceiver
-script/DeployNewChain.s.sol       template: a new chain's full bring-up
-script/DeploySsrBridge.s.sol      template: an SSR bridge, mainnet and remote
-script/DeployAvaxMigration.s.sol  template: the Avalanche migration's deployer-side bundle
+src/L1OFTDeployer.sol            mainnet:   SkyOFTAdapter proxy, wired and handed to the pause proxy
+src/L2OFTDeployer.sol            new chain: SkyOFTAdapterMintBurn proxy, wired and handed to the relay
+src/L2GovBridgeDeployer.sol      new chain: GovernanceOAppReceiver + L2GovernanceRelay
+src/SsrForwarderDeployer.sol     mainnet:   SSROracleForwarderLZ
+src/SsrRemoteDeployer.sol        remote:    SSRAuthOracle + LZComposeReceiver
 ```
 
 ## Deployment and configuration sequence
@@ -51,7 +48,7 @@ script/DeployAvaxMigration.s.sol  template: the Avalanche migration's deployer-s
 
 1. The DVN infrastructure, from `lz-gov-dvns-deploy` — its replica addresses are inputs to step 2's
    governance ULN config.
-2. `GovBridgeDeployer` — deploys the receiver and the relay every later step hands off to.
+2. `L2GovBridgeDeployer` — deploys the receiver and the relay every later step hands off to.
 3. The chain's tokens — each adapter takes its token as a constructor immutable.
 4. `L2OFTDeployer`, one per token — deploys and wires an adapter; `rely` it on its token afterwards.
 5. `LZL2Spell` — stateless and unowned, so no deployer owns it; its address is what a spell passes to

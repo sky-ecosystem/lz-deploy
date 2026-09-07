@@ -3,7 +3,7 @@ pragma solidity ^0.8.24;
 
 import { Test } from "forge-std/Test.sol";
 
-import { GovDvnSet } from "script/GovDvnSet.sol";
+import { GovDvnSet } from "script/test/GovDvnSet.sol";
 
 contract BroadcasterStub {
     address[] internal replicas;
