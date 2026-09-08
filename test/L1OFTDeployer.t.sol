@@ -121,15 +121,10 @@ contract L1OFTDeployerTest is LZDeployTestBase {
     // ==================================
 
     function test_deploysAndConfiguresLockbox() public view {
-        // The aggregate type is this deployer's alone, from its own field, and `Gross` is not the
-        // enum's zero value: the per-eid type stays `Net`, and `activateOft` is what checks it.
         assertEq(SkyLockboxLike(oft).aggregateRateLimitAccountingType(), uint8(RateLimitAccountingType.Gross));
 
         assertTrue(SkyOFTPauserLike(oft).pausers(breaker));
 
-        // Set after the wiring: the sentinel bucket is what makes this a lockbox, capping the total
-        // across all remotes, and an unset one blocks every transfer — so a deployment that leaves
-        // the cap to a spell writes zero here.
         (, uint48 outWindow,, uint256 outLimit) = OFTAdapterLike(oft).outboundRateLimits(sentinel);
         (, uint48 inWindow,,  uint256 inLimit)  = OFTAdapterLike(oft).inboundRateLimits(sentinel);
         assertEq(outLimit,  globalLimits.outboundLimit);

@@ -68,7 +68,7 @@ contract SsrDeployersTest is LZDeployTestBase {
             peer:         remoteDep.predictedReceiver(),
             sendLib:      SEND_LIB,
             execCfg:      execCfg,
-            sendUlnCfg:   govSendUlnCfg,
+            sendUlnCfg:   govUlnCfg,
             ccipDvnIndex: type(uint256).max, // LZInit.NO_CCIP_DVN
             optionsGas:   FWD_OPTIONS_GAS,
             composeGas:   FWD_COMPOSE_GAS
@@ -76,7 +76,7 @@ contract SsrDeployersTest is LZDeployTestBase {
         forwarder = address(new SsrForwarderDeployer(DST_EID, fwdCfg).forwarder());
 
         // 3. remote: receiver, now that the forwarder address is known, handed off in the same call
-        remoteDep.deployReceiver(ENDPOINT, forwarder, RECV_LIB, govRecvUlnCfg, l2GovRelay);
+        remoteDep.deployReceiver(ENDPOINT, forwarder, RECV_LIB, govUlnCfg, l2GovRelay);
         receiver = address(remoteDep.receiver());
 
         vm.stopPrank();
@@ -146,8 +146,9 @@ contract SsrDeployersTest is LZDeployTestBase {
         (address recvLib, bool isDefault) = EndpointLike(ENDPOINT).getReceiveLibrary(receiver, ETH_EID);
         assertEq(recvLib, RECV_LIB);
         assertFalse(isDefault, "receive library must be set explicitly");
+        assertEq(EndpointLike(ENDPOINT).receiveLibraryTimeout(receiver, ETH_EID), address(0));
 
-        _assertUlnConfig(abi.encode(UlnLike(RECV_LIB).getAppUlnConfig(receiver, ETH_EID)), govRecvUlnCfg);
+        _assertUlnConfig(abi.encode(UlnLike(RECV_LIB).getAppUlnConfig(receiver, ETH_EID)), govUlnCfg);
 
         assertEq(r.owner(),                                  l2GovRelay);
         assertEq(EndpointLike(ENDPOINT).delegates(receiver), l2GovRelay);
@@ -159,12 +160,12 @@ contract SsrDeployersTest is LZDeployTestBase {
 
     function test_onlyDeployerCanDeployTheReceiver() public {
         vm.expectRevert("SsrRemoteDeployer/not-deployer");
-        remoteDep.deployReceiver(ENDPOINT, forwarder, RECV_LIB, govRecvUlnCfg, l2GovRelay);
+        remoteDep.deployReceiver(ENDPOINT, forwarder, RECV_LIB, govUlnCfg, l2GovRelay);
     }
 
     function test_receiverCannotBeDeployedTwice() public {
         vm.prank(deployerEOA);
         vm.expectRevert("SsrRemoteDeployer/receiver-already-deployed");
-        remoteDep.deployReceiver(ENDPOINT, forwarder, RECV_LIB, govRecvUlnCfg, l2GovRelay);
+        remoteDep.deployReceiver(ENDPOINT, forwarder, RECV_LIB, govUlnCfg, l2GovRelay);
     }
 }

@@ -42,8 +42,7 @@ abstract contract LZDeployTestBase is Test {
     ExecutorConfig execCfg;
     UlnConfig      oftSendUlnCfg;
     UlnConfig      oftRecvUlnCfg;
-    UlnConfig      govSendUlnCfg;
-    UlnConfig      govRecvUlnCfg;
+    UlnConfig      govUlnCfg;
 
     function setUp() public virtual {
         vm.createSelectFork(getChain("mainnet").rpcUrl, FORK_BLOCK);
@@ -80,47 +79,24 @@ abstract contract LZDeployTestBase is Test {
             optionalDVNs:         new address[](0)
         });
 
-        // Governance send side: no required DVNs (255 = NIL), 4 of the 7 LZ-aligned providers, as
-        // the live route runs. The shared CCIP DVN adapter is spliced in by whoever wires it.
-        address[] memory govSendDVNs = new address[](7);
-        govSendDVNs[0] = DVN_P2P;
-        govSendDVNs[1] = DVN_DEUTSCHE_TELEKOM;
-        govSendDVNs[2] = DVN_HORIZEN;
-        govSendDVNs[3] = DVN_LUGANODES;
-        govSendDVNs[4] = DVN_LZ_LABS;
-        govSendDVNs[5] = DVN_CANARY;
-        govSendDVNs[6] = DVN_NETHERMIND;
+        // Governance routes: no required DVNs (255 = NIL), 4 of the 7 LZ-aligned providers.
+        address[] memory govDVNs = new address[](7);
+        govDVNs[0] = DVN_P2P;
+        govDVNs[1] = DVN_DEUTSCHE_TELEKOM;
+        govDVNs[2] = DVN_HORIZEN;
+        govDVNs[3] = DVN_LUGANODES;
+        govDVNs[4] = DVN_LZ_LABS;
+        govDVNs[5] = DVN_CANARY;
+        govDVNs[6] = DVN_NETHERMIND;
 
-        govSendUlnCfg = UlnConfig({
+        govUlnCfg = UlnConfig({
             confirmations:        15,
             requiredDVNCount:     255,
             optionalDVNCount:     7,
             optionalDVNThreshold: 4,
             requiredDVNs:         new address[](0),
-            optionalDVNs:         govSendDVNs
+            optionalDVNs:         govDVNs
         });
-
-        // Governance receive side: 8 of 15 — those seven providers plus both Sky wings' four
-        // replicas, a threshold two wings reach and none reaches alone.
-        address[] memory govRecvDVNs = new address[](15);
-        for (uint256 i; i < govSendDVNs.length; ++i) govRecvDVNs[i] = govSendDVNs[i];
-        for (uint256 i; i < 8; ++i)                  govRecvDVNs[7 + i] = _replica(i);
-
-        govRecvUlnCfg = UlnConfig({
-            confirmations:        15,
-            requiredDVNCount:     255,
-            optionalDVNCount:     15,
-            optionalDVNThreshold: 8,
-            requiredDVNs:         new address[](0),
-            optionalDVNs:         govRecvDVNs
-        });
-    }
-
-    /// @dev Stands in for a `DVNReplica`, which exists only on the chain its broadcaster spawned it
-    ///      on. A ULN config asks nothing of a DVN address but that the set be ascending and
-    ///      distinct, and these sort after every real DVN.
-    function _replica(uint256 i) internal pure returns (address) {
-        return address(uint160(0xf0F0000000000000000000000000000000000000) + uint160(i));
     }
 
     function _assertUlnConfig(bytes memory raw, UlnConfig memory expected) internal pure {

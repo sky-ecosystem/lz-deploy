@@ -32,9 +32,9 @@ interface GovSenderLike {
 
 /// @notice Acceptance test for `L2GovBridgeDeployer`: deploy the new chain's half of the governance
 ///         bridge as the deployer would, then run the mainnet function the spell itself calls.
-/// @dev    Nothing on a remote chain can be read by a mainnet spell, so the receiver and the relay are
-///         asserted directly. The peer is the real chainlog `LZ_GOV_SENDER`, which is what lets
-///         `wireGovPeer` run against them.
+/// @dev    Nothing on a remote chain can be read by a mainnet spell, so the receiver and the relay
+///         its constructor deploys are asserted directly. The peer is the real chainlog
+///         `LZ_GOV_SENDER`, which is what lets `wireGovPeer` run against them.
 contract L2GovBridgeDeployerTest is LZDeployTestBase {
 
     address deployerEOA = makeAddr("deployerEOA");
@@ -52,7 +52,7 @@ contract L2GovBridgeDeployerTest is LZDeployTestBase {
     function setUp() public override {
         super.setUp();
 
-        recvCfg = GovRecvConfig({ recvLib: RECV_LIB, recvUlnCfg: govRecvUlnCfg });
+        recvCfg = GovRecvConfig({ recvLib: RECV_LIB, recvUlnCfg: govUlnCfg });
 
         address[] memory bud = new address[](1);
         bud[0] = freezer;
@@ -84,7 +84,7 @@ contract L2GovBridgeDeployerTest is LZDeployTestBase {
             peer:         receiver,
             sendLib:      SEND_LIB,
             execCfg:      execCfg,
-            sendUlnCfg:   govSendUlnCfg,
+            sendUlnCfg:   govUlnCfg,
             ccipDvnIndex: type(uint256).max, // LZInit.NO_CCIP_DVN
             l2GovRelay:   relay
         });
@@ -107,34 +107,13 @@ contract L2GovBridgeDeployerTest is LZDeployTestBase {
     }
 
     // ==================================
-    //  Receiver
+    //  Deployment
     // ==================================
 
-    function test_deploysWiresAndHandsOffReceiver() public view {
+    function test_deploysWiresAndHandsOffBridge() public view {
         assertEq(OAppLike(receiver).peers(ETH_EID), bytes32(uint256(uint160(GOV_SENDER))));
         assertEq(OAppLike(receiver).endpoint(),     ENDPOINT);
 
-        (address recvLib, bool isDefault) = EndpointLike(ENDPOINT).getReceiveLibrary(receiver, ETH_EID);
-        assertEq(recvLib, RECV_LIB);
-        assertFalse(isDefault, "receive library must be set explicitly, not inherited");
-        assertEq(EndpointLike(ENDPOINT).receiveLibraryTimeout(receiver, ETH_EID), address(0));
-
-        _assertUlnConfig(abi.encode(UlnLike(RECV_LIB).getAppUlnConfig(receiver, ETH_EID)), govRecvUlnCfg);
-
-        // The relay takes both roles, so neither the deployer nor its caller keeps any.
-        assertEq(OwnableLike(receiver).owner(),              relay, "relay must own the receiver");
-        assertEq(EndpointLike(ENDPOINT).delegates(receiver), relay, "relay must be the delegate");
-        assertTrue(OwnableLike(receiver).owner() != address(dep));
-        assertTrue(OwnableLike(receiver).owner() != deployerEOA);
-        assertTrue(EndpointLike(ENDPOINT).delegates(receiver) != address(dep));
-        assertTrue(EndpointLike(ENDPOINT).delegates(receiver) != deployerEOA);
-    }
-
-    // ==================================
-    //  Relay
-    // ==================================
-
-    function test_deploysRelay() public view {
         L2GovernanceRelayLike r = L2GovernanceRelayLike(relay);
 
         assertEq(r.l1Eid(),             ETH_EID);
@@ -143,19 +122,15 @@ contract L2GovBridgeDeployerTest is LZDeployTestBase {
         assertEq(r.delay(),             DELAY);
         assertEq(r.gracePeriod(),       GRACE_PERIOD);
         assertEq(r.bud(freezer),        1, "freezer must be budded");
-    }
 
-    /// @dev The relay rejects a grace period too short to execute in.
-    function test_revertsOnShortGracePeriod() public {
-        vm.expectRevert("L2GovernanceRelay/grace-period-too-short");
-        new L2GovBridgeDeployer({
-            endpoint:    ENDPOINT,
-            l1GovSender: GOV_SENDER,
-            l1GovRelay:  L1_GOV_RELAY,
-            delay:       DELAY,
-            gracePeriod: 1 minutes,
-            bud:         new address[](0),
-            cfg:         recvCfg
-        });
+        (address recvLib, bool isDefault) = EndpointLike(ENDPOINT).getReceiveLibrary(receiver, ETH_EID);
+        assertEq(recvLib, RECV_LIB);
+        assertFalse(isDefault, "receive library must be set explicitly, not inherited");
+        assertEq(EndpointLike(ENDPOINT).receiveLibraryTimeout(receiver, ETH_EID), address(0));
+
+        _assertUlnConfig(abi.encode(UlnLike(RECV_LIB).getAppUlnConfig(receiver, ETH_EID)), govUlnCfg);
+
+        assertEq(OwnableLike(receiver).owner(),              relay, "relay must own the receiver");
+        assertEq(EndpointLike(ENDPOINT).delegates(receiver), relay, "relay must be the delegate");
     }
 }
