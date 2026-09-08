@@ -91,7 +91,7 @@ abstract contract LZDeployTestBase is Test {
 
         govUlnCfg = UlnConfig({
             confirmations:        15,
-            requiredDVNCount:     255,
+            requiredDVNCount:     255,  // NIL: explicitly no required DVNs
             optionalDVNCount:     7,
             optionalDVNThreshold: 4,
             requiredDVNs:         new address[](0),

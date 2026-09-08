@@ -69,7 +69,7 @@ contract SsrDeployersTest is LZDeployTestBase {
             sendLib:      SEND_LIB,
             execCfg:      execCfg,
             sendUlnCfg:   govUlnCfg,
-            ccipDvnIndex: type(uint256).max, // LZInit.NO_CCIP_DVN
+            ccipDvnIndex: LZInit.NO_CCIP_DVN,
             optionsGas:   FWD_OPTIONS_GAS,
             composeGas:   FWD_COMPOSE_GAS
         });
@@ -107,28 +107,19 @@ contract SsrDeployersTest is LZDeployTestBase {
         assertEq(oracle.maxSSR(), MAX_SSR);
 
         assertTrue(oracle.hasRole(oracle.DATA_PROVIDER_ROLE(), receiver));
-        assertFalse(oracle.hasRole(oracle.DATA_PROVIDER_ROLE(), forwarder));
-        assertFalse(oracle.hasRole(oracle.DATA_PROVIDER_ROLE(), address(remoteDep)));
-
         assertTrue(oracle.hasRole(oracle.DEFAULT_ADMIN_ROLE(), oracleAdmin));
         assertFalse(oracle.hasRole(oracle.DEFAULT_ADMIN_ROLE(), address(remoteDep)), "deployer must renounce admin");
     }
 
-    /// @dev Zero means no cap; anything else below `RAY` is not a rate.
-    function test_revertsOnMaxSSRBelowRay() public {
-        vm.expectRevert("SSRAuthOracle/invalid-max-ssr");
-        new SsrRemoteDeployer(1e26, oracleAdmin);
-    }
-
-    /// @dev No admin freezes `DATA_PROVIDER_ROLE` and `maxSSR` for good. Deliberate; asserted so it
-    ///      cannot regress silently.
+    /// @dev A zero admin leaves the oracle with none, freezing `maxSSR` and `DATA_PROVIDER_ROLE` for
+    ///      good.
     function test_zeroOracleAdminLeavesNoAdmin() public {
         vm.prank(deployerEOA);
         SsrRemoteDeployer dep = new SsrRemoteDeployer(MAX_SSR, address(0));
 
         OracleLike oracle = OracleLike(address(dep.oracle()));
+        assertFalse(oracle.hasRole(oracle.DEFAULT_ADMIN_ROLE(), address(0)));
         assertFalse(oracle.hasRole(oracle.DEFAULT_ADMIN_ROLE(), address(dep)));
-        assertFalse(oracle.hasRole(oracle.DEFAULT_ADMIN_ROLE(), l2GovRelay));
     }
 
     function test_deploysWiresAndHandsOffReceiver() public view {

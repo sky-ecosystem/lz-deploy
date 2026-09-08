@@ -85,7 +85,7 @@ contract L2GovBridgeDeployerTest is LZDeployTestBase {
             sendLib:      SEND_LIB,
             execCfg:      execCfg,
             sendUlnCfg:   govUlnCfg,
-            ccipDvnIndex: type(uint256).max, // LZInit.NO_CCIP_DVN
+            ccipDvnIndex: LZInit.NO_CCIP_DVN,
             l2GovRelay:   relay
         });
 

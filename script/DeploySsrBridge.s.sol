@@ -169,7 +169,7 @@ contract DeploySsrBridge is Script {
             recvLib:    REMOTE_RECV_LIB,
             recvUlnCfg: UlnConfig({
                 confirmations:        CONFIRMATIONS,
-                requiredDVNCount:     255,
+                requiredDVNCount:     255,       // NIL: explicitly no required DVNs
                 optionalDVNCount:     uint8(dvns.length),
                 optionalDVNThreshold: RECV_THRESHOLD,
                 requiredDVNs:         new address[](0),
