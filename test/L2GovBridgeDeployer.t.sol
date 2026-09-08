@@ -30,8 +30,11 @@ interface GovSenderLike {
     function canCallTarget(address srcSender, uint32 dstEid, bytes32 dstTarget) external view returns (bool);
 }
 
-/// @dev The remote half of the governance bridge, run against a mainnet fork. Its peer is the real
-///      chainlog `LZ_GOV_SENDER`, which lets the last test drive `wireGovPeer` against it.
+/// @notice Acceptance test for `L2GovBridgeDeployer`: deploy the new chain's half of the governance
+///         bridge as the deployer would, then run the mainnet function the spell itself calls.
+/// @dev    Nothing on a remote chain can be read by a mainnet spell, so the receiver and the relay are
+///         asserted directly. The peer is the real chainlog `LZ_GOV_SENDER`, which is what lets
+///         `wireGovPeer` run against them.
 contract L2GovBridgeDeployerTest is LZDeployTestBase {
 
     address deployerEOA = makeAddr("deployerEOA");
@@ -49,7 +52,7 @@ contract L2GovBridgeDeployerTest is LZDeployTestBase {
     function setUp() public override {
         super.setUp();
 
-        recvCfg = GovRecvConfig({ recvLib: RECV_LIB, recvUlnCfg: govUlnCfg });
+        recvCfg = GovRecvConfig({ recvLib: RECV_LIB, recvUlnCfg: govRecvUlnCfg });
 
         address[] memory bud = new address[](1);
         bud[0] = freezer;
@@ -70,7 +73,7 @@ contract L2GovBridgeDeployerTest is LZDeployTestBase {
     }
 
     // ==================================
-    //  Acceptance: the L1 spell half accepts these outputs
+    //  Acceptance: lz-init-lib accepts what we deploy
     // ==================================
 
     /// @dev `wireGovPeer` completes the bridge and consumes both addresses this deployer produces:
@@ -81,10 +84,16 @@ contract L2GovBridgeDeployerTest is LZDeployTestBase {
             peer:         receiver,
             sendLib:      SEND_LIB,
             execCfg:      execCfg,
-            sendUlnCfg:   govUlnCfg,
+            sendUlnCfg:   govSendUlnCfg,
             ccipDvnIndex: type(uint256).max, // LZInit.NO_CCIP_DVN
             l2GovRelay:   relay
         });
+
+        assertEq(OAppLike(GOV_SENDER).peers(DST_EID), bytes32(0), "route must not exist yet");
+        assertFalse(
+            GovSenderLike(GOV_SENDER).canCallTarget(L1_GOV_RELAY, DST_EID, bytes32(uint256(uint160(relay)))),
+            "L1 relay must not be whitelisted yet"
+        );
 
         vm.startPrank(PAUSE_PROXY);
         LZInit.wireGovPeer(DST_EID, cfg);
@@ -101,29 +110,20 @@ contract L2GovBridgeDeployerTest is LZDeployTestBase {
     //  Receiver
     // ==================================
 
-    function test_receiverIsPeeredToL1GovSender() public view {
+    function test_deploysWiresAndHandsOffReceiver() public view {
         assertEq(OAppLike(receiver).peers(ETH_EID), bytes32(uint256(uint160(GOV_SENDER))));
         assertEq(OAppLike(receiver).endpoint(),     ENDPOINT);
-    }
 
-    function test_receiveLibraryIsPinnedNotDefault() public view {
         (address recvLib, bool isDefault) = EndpointLike(ENDPOINT).getReceiveLibrary(receiver, ETH_EID);
         assertEq(recvLib, RECV_LIB);
         assertFalse(isDefault, "receive library must be set explicitly, not inherited");
         assertEq(EndpointLike(ENDPOINT).receiveLibraryTimeout(receiver, ETH_EID), address(0));
-    }
 
-    function test_receiveUlnConfigMatchesWingSet() public view {
-        _assertUlnConfig(abi.encode(UlnLike(RECV_LIB).getAppUlnConfig(receiver, ETH_EID)), govUlnCfg);
-    }
+        _assertUlnConfig(abi.encode(UlnLike(RECV_LIB).getAppUlnConfig(receiver, ETH_EID)), govRecvUlnCfg);
 
-    function test_receiverHandedToRelay() public view {
+        // The relay takes both roles, so neither the deployer nor its caller keeps any.
         assertEq(OwnableLike(receiver).owner(),              relay, "relay must own the receiver");
         assertEq(EndpointLike(ENDPOINT).delegates(receiver), relay, "relay must be the delegate");
-    }
-
-    /// @dev No residual power once the constructor returns.
-    function test_deployerRetainsNoControl() public view {
         assertTrue(OwnableLike(receiver).owner() != address(dep));
         assertTrue(OwnableLike(receiver).owner() != deployerEOA);
         assertTrue(EndpointLike(ENDPOINT).delegates(receiver) != address(dep));
@@ -134,7 +134,7 @@ contract L2GovBridgeDeployerTest is LZDeployTestBase {
     //  Relay
     // ==================================
 
-    function test_relayConfiguration() public view {
+    function test_deploysRelay() public view {
         L2GovernanceRelayLike r = L2GovernanceRelayLike(relay);
 
         assertEq(r.l1Eid(),             ETH_EID);
@@ -148,6 +148,14 @@ contract L2GovBridgeDeployerTest is LZDeployTestBase {
     /// @dev The relay rejects a grace period too short to execute in.
     function test_revertsOnShortGracePeriod() public {
         vm.expectRevert("L2GovernanceRelay/grace-period-too-short");
-        new L2GovBridgeDeployer(ENDPOINT, GOV_SENDER, L1_GOV_RELAY, DELAY, 1 minutes, new address[](0), recvCfg);
+        new L2GovBridgeDeployer({
+            endpoint:    ENDPOINT,
+            l1GovSender: GOV_SENDER,
+            l1GovRelay:  L1_GOV_RELAY,
+            delay:       DELAY,
+            gracePeriod: 1 minutes,
+            bud:         new address[](0),
+            cfg:         recvCfg
+        });
     }
 }

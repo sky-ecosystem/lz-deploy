@@ -28,43 +28,43 @@ abstract contract LZDeployTestBase is Test {
     uint32 constant ETH_EID  = 30101;
     uint32 constant DST_EID  = 30184; // Base, standing in for "the other side of the route"
 
-    uint128 constant OPTIONS_GAS = 130_000;
+    uint128 constant OFT_OPTIONS_GAS = 130_000;
+
+    /// @dev The suite asserts against live mainnet state, so the block is pinned rather than
+    ///      overridable: at another height those references are different values.
+    uint256 constant FORK_BLOCK = 24871363;
 
     address PAUSE_PROXY;
     address GOV_SENDER;
     address L1_GOV_RELAY;
     address USDS;
-    address SUSDS;
 
     ExecutorConfig execCfg;
     UlnConfig      oftSendUlnCfg;
     UlnConfig      oftRecvUlnCfg;
-    UlnConfig      govUlnCfg;
+    UlnConfig      govSendUlnCfg;
+    UlnConfig      govRecvUlnCfg;
 
     function setUp() public virtual {
-        // Pinned so the live references read below cannot shift underneath the suite; needs an
-        // archive RPC. `FORK_BLOCK=<recent block>` works on a non-archive one; `0` uses the latest,
-        // which can race the tip.
-        uint256 forkBlock = vm.envOr("FORK_BLOCK", uint256(24871363));
-        if (forkBlock == 0) vm.createSelectFork(getChain("mainnet").rpcUrl);
-        else                vm.createSelectFork(getChain("mainnet").rpcUrl, forkBlock);
+        vm.createSelectFork(getChain("mainnet").rpcUrl, FORK_BLOCK);
 
         PAUSE_PROXY  = LZInit.chainlog.getAddress("MCD_PAUSE_PROXY");
         GOV_SENDER   = LZInit.chainlog.getAddress("LZ_GOV_SENDER");
         L1_GOV_RELAY = LZInit.chainlog.getAddress("LZ_GOV_RELAY");
         USDS         = LZInit.chainlog.getAddress("USDS");
-        SUSDS        = LZInit.chainlog.getAddress("SUSDS");
 
         execCfg = ExecutorConfig({ maxMessageSize: 10_000, executor: EXECUTOR });
 
-        // OFT routes: 2-of-2 required DVNs, matching production.
-        address[] memory oftRequiredDVNs = new address[](2);
-        oftRequiredDVNs[0] = DVN_LZ_LABS;
-        oftRequiredDVNs[1] = DVN_NETHERMIND;
+        // OFT routes: a small required set, no wings and no threshold — the four the templates wire.
+        address[] memory oftRequiredDVNs = new address[](4);
+        oftRequiredDVNs[0] = DVN_HORIZEN;
+        oftRequiredDVNs[1] = DVN_LZ_LABS;
+        oftRequiredDVNs[2] = DVN_CANARY;
+        oftRequiredDVNs[3] = DVN_NETHERMIND;
 
         oftSendUlnCfg = UlnConfig({
             confirmations:        15,
-            requiredDVNCount:     2,
+            requiredDVNCount:     4,
             optionalDVNCount:     0,
             optionalDVNThreshold: 0,
             requiredDVNs:         oftRequiredDVNs,
@@ -73,32 +73,54 @@ abstract contract LZDeployTestBase is Test {
 
         oftRecvUlnCfg = UlnConfig({
             confirmations:        12,
-            requiredDVNCount:     2,
+            requiredDVNCount:     4,
             optionalDVNCount:     0,
             optionalDVNThreshold: 0,
             requiredDVNs:         oftRequiredDVNs,
             optionalDVNs:         new address[](0)
         });
 
-        // Governance route: no required DVNs (255 = NIL), 4-of-7 optional. The real receive side
-        // also carries the CCIP and multisig DVNReplicas — just more addresses in this array.
-        address[] memory govOptionalDVNs = new address[](7);
-        govOptionalDVNs[0] = DVN_P2P;
-        govOptionalDVNs[1] = DVN_DEUTSCHE_TELEKOM;
-        govOptionalDVNs[2] = DVN_HORIZEN;
-        govOptionalDVNs[3] = DVN_LUGANODES;
-        govOptionalDVNs[4] = DVN_LZ_LABS;
-        govOptionalDVNs[5] = DVN_CANARY;
-        govOptionalDVNs[6] = DVN_NETHERMIND;
+        // Governance send side: no required DVNs (255 = NIL), 4 of the 7 LZ-aligned providers, as
+        // the live route runs. The shared CCIP DVN adapter is spliced in by whoever wires it.
+        address[] memory govSendDVNs = new address[](7);
+        govSendDVNs[0] = DVN_P2P;
+        govSendDVNs[1] = DVN_DEUTSCHE_TELEKOM;
+        govSendDVNs[2] = DVN_HORIZEN;
+        govSendDVNs[3] = DVN_LUGANODES;
+        govSendDVNs[4] = DVN_LZ_LABS;
+        govSendDVNs[5] = DVN_CANARY;
+        govSendDVNs[6] = DVN_NETHERMIND;
 
-        govUlnCfg = UlnConfig({
+        govSendUlnCfg = UlnConfig({
             confirmations:        15,
             requiredDVNCount:     255,
             optionalDVNCount:     7,
             optionalDVNThreshold: 4,
             requiredDVNs:         new address[](0),
-            optionalDVNs:         govOptionalDVNs
+            optionalDVNs:         govSendDVNs
         });
+
+        // Governance receive side: 8 of 15 — those seven providers plus both Sky wings' four
+        // replicas, a threshold two wings reach and none reaches alone.
+        address[] memory govRecvDVNs = new address[](15);
+        for (uint256 i; i < govSendDVNs.length; ++i) govRecvDVNs[i] = govSendDVNs[i];
+        for (uint256 i; i < 8; ++i)                  govRecvDVNs[7 + i] = _replica(i);
+
+        govRecvUlnCfg = UlnConfig({
+            confirmations:        15,
+            requiredDVNCount:     255,
+            optionalDVNCount:     15,
+            optionalDVNThreshold: 8,
+            requiredDVNs:         new address[](0),
+            optionalDVNs:         govRecvDVNs
+        });
+    }
+
+    /// @dev Stands in for a `DVNReplica`, which exists only on the chain its broadcaster spawned it
+    ///      on. A ULN config asks nothing of a DVN address but that the set be ascending and
+    ///      distinct, and these sort after every real DVN.
+    function _replica(uint256 i) internal pure returns (address) {
+        return address(uint160(0xf0F0000000000000000000000000000000000000) + uint160(i));
     }
 
     function _assertUlnConfig(bytes memory raw, UlnConfig memory expected) internal pure {

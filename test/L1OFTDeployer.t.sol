@@ -7,8 +7,6 @@ import {
     LZInit,
     OftConfig,
     RateLimits,
-    EndpointLike,
-    OAppLike,
     OFTAdapterLike
 } from "lz-init-lib/LZInit.sol";
 
@@ -20,13 +18,22 @@ interface SkyLockboxLike {
     function aggregateRateLimitAccountingType() external view returns (uint8);
 }
 
+interface SkyOFTPauserLike {
+    function pausers(address pauser) external view returns (bool);
+}
+
 /// @notice Acceptance test for `L1OFTDeployer`: deploy the lockbox as the deployer would, then run
 ///         the governance-side function the spell itself calls.
-/// @dev    Covers what a lockbox has and an L2 adapter does not — the global (sentinel) cap and its
-///         own accounting type. The shared wiring assertions live in `L2OFTDeployer.t.sol`.
+/// @dev    `activateOft` re-reads the per-remote config and the handoff, so what is asserted
+///         directly is only what it does not look at: the sentinel cap and its own accounting type,
+///         and the pauser set. The endpoint this deployer derives from the chainlog is one of the
+///         things it checks, against the address the acceptance test passes in.
 contract L1OFTDeployerTest is LZDeployTestBase {
 
     address remotePeer = makeAddr("remotePeer");
+    address breaker    = makeAddr("breaker");
+
+    uint32 constant OTHER_EID = 30106; // Avalanche, as a second remote at go-live
 
     L1OFTDeployer dep;
     address       oft;
@@ -45,78 +52,84 @@ contract L1OFTDeployerTest is LZDeployTestBase {
             sendUlnCfg: oftSendUlnCfg,
             recvLib:    RECV_LIB,
             recvUlnCfg: oftRecvUlnCfg,
-            optionsGas: OPTIONS_GAS
+            optionsGas: OFT_OPTIONS_GAS
         });
 
-        dep      = _deploy(RateLimitAccountingType.Net, RateLimitAccountingType.Gross, globalLimits);
+        dep      = new L1OFTDeployer(_deployment());
         oft      = address(dep.oft());
         sentinel = OFTAdapterLike(oft).SENTINEL_EID();
     }
 
-    function _deploy(
-        RateLimitAccountingType accountingType,
-        RateLimitAccountingType aggregateAccountingType,
-        RateLimits       memory limits
-    ) internal returns (L1OFTDeployer) {
-        RemoteWiring[] memory remotes = new RemoteWiring[](1);
-        remotes[0] = RemoteWiring(DST_EID, oftCfg, RateLimits(0, 0, 0, 0));
+    /// @dev The fixture's inputs; each scenario below changes the one field it is about.
+    function _deployment() internal view returns (L1OftDeployment memory) {
+        RemoteWiring[] memory remotes = new RemoteWiring[](2);
+        remotes[0] = RemoteWiring(DST_EID,   oftCfg, RateLimits(0, 0, 0, 0));
+        remotes[1] = RemoteWiring(OTHER_EID, oftCfg, RateLimits(0, 0, 0, 0));
 
-        return new L1OFTDeployer(L1OftDeployment({
+        address[] memory pausers = new address[](1);
+        pausers[0] = breaker;
+
+        return L1OftDeployment({
             token:                   USDS,
-            accountingType:          accountingType,
-            aggregateAccountingType: aggregateAccountingType,
-            globalLimits:            limits,
-            pausers:                 new address[](0),
+            accountingType:          RateLimitAccountingType.Net,
+            aggregateAccountingType: RateLimitAccountingType.Gross,
+            globalLimits:            globalLimits,
+            pausers:                 pausers,
             remotes:                 remotes
-        }));
+        });
     }
 
     // ==================================
     //  Acceptance: lz-init-lib accepts what we deploy
     // ==================================
 
-    function test_activateOftAcceptsDeployedState() public {
+    function test_activateOftAcceptsEveryRemote() public {
         RateLimits memory perEid = RateLimits(1 days, 5_000_000e18, 1 days, 4_000_000e18);
 
-        // `startPrank`, not `prank`: the library call is inlined here and makes many external calls.
-        vm.startPrank(PAUSE_PROXY);
-        LZInit.activateOft({
-            oft:              oft,
-            oftImp:           address(dep.implementation()),
-            remoteEid:        DST_EID,
-            cfg:              oftCfg,
-            rateLimits:       perEid,
-            rlAccountingType: uint8(RateLimitAccountingType.Net),
-            token:            USDS,
-            owner:            PAUSE_PROXY,
-            endpoint:         ENDPOINT
-        });
-        vm.stopPrank();
+        uint32[2] memory eids = [DST_EID, OTHER_EID];
 
-        (,,, uint256 outLimit) = OFTAdapterLike(oft).outboundRateLimits(DST_EID);
-        assertEq(outLimit, perEid.outboundLimit, "per-eid limit not activated");
+        for (uint256 i; i < eids.length; ++i) {
+            // Zero until the spell runs: `activateOft` requires that, and is what opens them.
+            (,,, uint256 outLimit) = OFTAdapterLike(oft).outboundRateLimits(eids[i]);
+            (,,, uint256 inLimit)  = OFTAdapterLike(oft).inboundRateLimits(eids[i]);
+            assertEq(outLimit, 0);
+            assertEq(inLimit,  0);
+
+            vm.startPrank(PAUSE_PROXY);
+            LZInit.activateOft({
+                oft:              oft,
+                oftImp:           address(dep.implementation()),
+                remoteEid:        eids[i],
+                cfg:              oftCfg,
+                rateLimits:       perEid,
+                rlAccountingType: uint8(RateLimitAccountingType.Net),
+                token:            USDS,
+                owner:            PAUSE_PROXY,
+                endpoint:         ENDPOINT
+            });
+            vm.stopPrank();
+
+            (,,, outLimit) = OFTAdapterLike(oft).outboundRateLimits(eids[i]);
+            (,,, inLimit)  = OFTAdapterLike(oft).inboundRateLimits(eids[i]);
+            assertEq(outLimit, perEid.outboundLimit, "outbound limit not activated");
+            assertEq(inLimit,  perEid.inboundLimit,  "inbound limit not activated");
+        }
     }
 
     // ==================================
     //  Deployment
     // ==================================
 
-    function test_deploysProxyAndHandsOff() public view {
-        assertTrue(oft != address(dep.implementation()), "proxy must not be the implementation");
+    function test_deploysAndConfiguresLockbox() public view {
+        // The aggregate type is this deployer's alone, from its own field, and `Gross` is not the
+        // enum's zero value: the per-eid type stays `Net`, and `activateOft` is what checks it.
+        assertEq(SkyLockboxLike(oft).aggregateRateLimitAccountingType(), uint8(RateLimitAccountingType.Gross));
 
-        assertEq(OFTAdapterLike(oft).token(), USDS);
-        assertEq(OAppLike(oft).endpoint(),    ENDPOINT);
+        assertTrue(SkyOFTPauserLike(oft).pausers(breaker));
 
-        assertEq(OFTAdapterLike(oft).owner(),           PAUSE_PROXY);
-        assertEq(EndpointLike(ENDPOINT).delegates(oft), PAUSE_PROXY);
-    }
-
-    // ==================================
-    //  Lockbox specifics
-    // ==================================
-
-    /// @dev The sentinel bucket is what makes this a lockbox: an unset one blocks every transfer.
-    function test_setsGlobalCap() public view {
+        // Set after the wiring: the sentinel bucket is what makes this a lockbox, capping the total
+        // across all remotes, and an unset one blocks every transfer — so a deployment that leaves
+        // the cap to a spell writes zero here.
         (, uint48 outWindow,, uint256 outLimit) = OFTAdapterLike(oft).outboundRateLimits(sentinel);
         (, uint48 inWindow,,  uint256 inLimit)  = OFTAdapterLike(oft).inboundRateLimits(sentinel);
         assertEq(outLimit,  globalLimits.outboundLimit);
@@ -125,19 +138,26 @@ contract L1OFTDeployerTest is LZDeployTestBase {
         assertEq(inWindow,  globalLimits.inboundWindow);
     }
 
-    /// @dev Independent of the per-eid type, which stays `Net` here.
-    function test_setsAggregateAccountingTypeIndependently() public view {
-        assertEq(OFTAdapterLike(oft).rateLimitAccountingType(),          uint8(RateLimitAccountingType.Net));
-        assertEq(SkyLockboxLike(oft).aggregateRateLimitAccountingType(), uint8(RateLimitAccountingType.Gross));
+    /// @dev The other model: live at handoff, with no `activateOft` to follow.
+    function test_setsPerRemoteRateLimits() public {
+        L1OftDeployment memory d = _deployment();
+        d.remotes[0].rateLimits  = RateLimits(1 days, 5e18, 1 days, 4e18);
+
+        address live = address(new L1OFTDeployer(d).oft());
+
+        (,,, uint256 outLimit) = OFTAdapterLike(live).outboundRateLimits(DST_EID);
+        (,,, uint256 inLimit)  = OFTAdapterLike(live).inboundRateLimits(DST_EID);
+        assertEq(outLimit, 4e18);
+        assertEq(inLimit,  5e18);
     }
 
-    /// @dev Zero leaves the cap to a spell, which is the avax-migration shape.
-    function test_leavesGlobalCapZeroWhenAsked() public {
-        address zeroCap = address(_deploy(
-            RateLimitAccountingType.Net, RateLimitAccountingType.Net, RateLimits(0, 0, 0, 0)
-        ).oft());
+    function test_revertsOnDuplicateRemote() public {
+        L1OftDeployment memory d = _deployment();
+        d.remotes    = new RemoteWiring[](2);
+        d.remotes[0] = RemoteWiring(DST_EID, oftCfg, RateLimits(0, 0, 0, 0));
+        d.remotes[1] = RemoteWiring(DST_EID, oftCfg, RateLimits(0, 0, 0, 0));
 
-        (,,, uint256 outLimit) = OFTAdapterLike(zeroCap).outboundRateLimits(sentinel);
-        assertEq(outLimit, 0);
+        vm.expectRevert("LZInit/already-wired");
+        new L1OFTDeployer(d);
     }
 }
