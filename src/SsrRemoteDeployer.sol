@@ -9,11 +9,9 @@ import { LZInit, UlnConfig, EndpointLike } from "lz-init-lib/LZInit.sol";
 /// @notice Deploys the remote half of an SSR oracle bridge: the oracle and the LZ receiver that feeds
 ///         it from mainnet.
 /// @dev    Two steps, because the L1 forwarder takes the receiver's address as a constructor immutable
-///         and the receiver takes the forwarder's: `predictedReceiver` has to be published before
-///         either exists. The README gives the cross-chain sequence.
-///
-///         The prediction holds because this contract's nonce moves only when it deploys, and it
-///         deploys once.
+///         and the receiver takes the forwarder's: the constructor computes where the receiver will
+///         land, the forwarder is built against that, and `deployReceiver` then creates it. The
+///         README gives the cross-chain sequence.
 contract SsrRemoteDeployer {
 
     uint32 internal constant ETH_EID = 30101;

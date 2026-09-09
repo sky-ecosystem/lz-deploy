@@ -98,7 +98,7 @@ contract L1OFTDeployerTest is LZDeployTestBase {
             vm.startPrank(PAUSE_PROXY);
             LZInit.activateOft({
                 oft:              oft,
-                oftImp:           address(dep.implementation()),
+                oftImp:           dep.implementation(),
                 remoteEid:        eids[i],
                 cfg:              oftCfg,
                 rateLimits:       perEid,

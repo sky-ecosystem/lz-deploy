@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 pragma solidity ^0.8.24;
 
-import "forge-std/Test.sol";
+import { Test } from "forge-std/Test.sol";
 
 import { LZInit, UlnConfig, ExecutorConfig } from "lz-init-lib/LZInit.sol";
 

@@ -96,7 +96,7 @@ contract L2OFTDeployerTest is LZDeployTestBase {
             vm.startPrank(l2GovRelay);
             LZInit.activateOft({
                 oft:              oft,
-                oftImp:           address(dep.implementation()),
+                oftImp:           dep.implementation(),
                 remoteEid:        eids[i],
                 cfg:              oftCfg,
                 rateLimits:       limits,
