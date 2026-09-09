@@ -11,6 +11,7 @@ import { LZAvaxMigrationL2Spell }                                  from "lz-init
 import { GovernanceRelayDeploy } from "lz-governance-relay/deploy/GovernanceRelayDeploy.sol";
 
 import { GovDvnSet } from "script/GovDvnSet.sol";
+import { LzDvns }    from "script/LzDvns.sol";
 import {
     SendSideDeployer,
     RecvSideDeployer,
@@ -51,6 +52,7 @@ contract DeployAvaxMigration is Script {
 
     uint32  constant ETH_EID  = 30101;
     uint32  constant AVAX_EID = 30106;
+
     address constant AVAX_ENDPOINT = 0x1a44076050125825900e736c501f859c50fE728c;
 
     /// @dev The migration hands the new Avalanche adapters over from the old relay, so they must be
@@ -122,16 +124,6 @@ contract DeployAvaxMigration is Script {
     uint64 constant ETH_CONFIRMATIONS  = 15;
     uint64 constant AVAX_CONFIRMATIONS = 12;
 
-    /// @dev The token bridge's own DVN set, each endpoint's own four, sorted ascending. Not the
-    ///      governance bridge's replica set: the spell reconfigures that separately.
-    function _ethOftDVNs() internal pure returns (address[] memory dvns) {
-        dvns = new address[](4);
-        dvns[0] = 0x380275805876Ff19055EA900CDb2B46a94ecF20D; // Horizen
-        dvns[1] = 0x589dEDbD617e0CBcB916A9223F4d1300c294236b; // LayerZero Labs
-        dvns[2] = 0xa4fE5A5B9A846458a70Cd0748228aED3bF65c2cd; // Canary
-        dvns[3] = 0xa59BA433ac34D2927232918Ef5B2eaAfcF130BA5; // Nethermind
-    }
-
     function _avaxOftDVNs() internal pure returns (address[] memory dvns) {
         dvns = new address[](4);
         dvns[0] = 0x07C05EaB7716AcB6f83ebF6268F8EECDA8892Ba1; // Horizen
@@ -154,19 +146,6 @@ contract DeployAvaxMigration is Script {
     }
 
     // ============================ governance DVN wings ============================
-
-    /// @dev The LZ-aligned wing: the seven providers on `LZ_GOV_SENDER`'s own optional set, at their
-    ///      mainnet addresses. Sorted ascending.
-    function _ethLzDVNs() internal pure returns (address[] memory dvns) {
-        dvns = new address[](7);
-        dvns[0] = 0x06559EE34D85a88317Bf0bfE307444116c631b67; // P2P
-        dvns[1] = 0x373a6E5c0C4E89E24819f00AA37ea370917AAfF4; // Deutsche Telekom
-        dvns[2] = 0x380275805876Ff19055EA900CDb2B46a94ecF20D; // Horizen
-        dvns[3] = 0x58249a2Ec05c1978bF21DF1f5eC1847e42455CF4; // Luganodes
-        dvns[4] = 0x589dEDbD617e0CBcB916A9223F4d1300c294236b; // LayerZero Labs
-        dvns[5] = 0xa4fE5A5B9A846458a70Cd0748228aED3bF65c2cd; // Canary
-        dvns[6] = 0xa59BA433ac34D2927232918Ef5B2eaAfcF130BA5; // Nethermind
-    }
 
     /// @dev The same seven providers at their Avalanche addresses. Sorted ascending.
     function _avaxLzDVNs() internal pure returns (address[] memory dvns) {
@@ -350,7 +329,7 @@ contract DeployAvaxMigration is Script {
         internal pure returns (UlnConfig memory, uint256 ccipDvnIndex)
     {
         address[] memory dvns;
-        (dvns, ccipDvnIndex) = GovDvnSet.insertSorted(_ethLzDVNs(), l1Adapter);
+        (dvns, ccipDvnIndex) = GovDvnSet.insertSorted(LzDvns.ethGovDVNs(), l1Adapter);
 
         return (UlnConfig({
             confirmations:        ETH_CONFIRMATIONS,
@@ -417,7 +396,7 @@ contract DeployAvaxMigration is Script {
     }
 
     function _l1OftCfg(address peer) internal pure returns (OftConfig memory) {
-        return _oftCfg(peer, ETH_SEND_LIB, ETH_RECV_LIB, ETH_EXECUTOR, _ethOftDVNs(),
+        return _oftCfg(peer, ETH_SEND_LIB, ETH_RECV_LIB, ETH_EXECUTOR, LzDvns.ethOftDVNs(),
                        ETH_CONFIRMATIONS, ETH_TO_AVAX_OPTIONS_GAS);
     }
 

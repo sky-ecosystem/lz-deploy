@@ -24,7 +24,7 @@ interface WardsLike {
 /// @dev    Run with mainnet as the active fork and `BASE_RPC_URL` set. Needs a funded key on both.
 ///
 ///           BASE_RPC_URL=<base> forge script script/DeployNewChain.s.sol:DeployNewChain \
-///             --rpc-url <mainnet_rpc> --broadcast --slow --skip-simulation --verify
+///             --rpc-url <mainnet_rpc> --sender <deployer> --broadcast --slow
 ///
 ///         Retarget by replacing the `REMOTE_*` constants and the endpoint, which is not guaranteed
 ///         to be the same address on every chain. Two addresses need filling in:
@@ -52,6 +52,14 @@ contract DeployNewChain is Script {
     /// @dev FILL IN: the Sky Safe on this chain, which drives the multisig DVN wing.
     address constant SKY_MULTISIG = address(0);
 
+    function _ethCcipDvnAdapter() internal view virtual returns (address) {
+        return ETH_CCIP_DVN_ADAPTER;
+    }
+
+    function _skyMultisig() internal view virtual returns (address) {
+        return SKY_MULTISIG;
+    }
+
     // The remote chain's own deployments, pre-filled for Base.
     address constant REMOTE_SEND_LIB    = 0xB5320B0B3a13cC860893E2Bd79FCd7e13484Dda2; // SendUln302
     address constant REMOTE_RECV_LIB    = 0xc70AB6f32772f59fBfc23889Caf4Ba3376C84bAf; // ReceiveUln302
@@ -71,7 +79,11 @@ contract DeployNewChain is Script {
     // ============================ LayerZero config ============================
 
     uint32 constant MAX_MESSAGE_SIZE = 10_000;
-    uint64 constant CONFIRMATIONS    = 15;
+
+    /// @dev Source-chain blocks, so each leg carries its own: 15 Ethereum blocks inbound, 10 Base
+    ///      blocks outbound. Both are the respective endpoint's default for the route.
+    uint64 constant ETH_CONFIRMATIONS    = 15;
+    uint64 constant REMOTE_CONFIRMATIONS = 10;
 
     /// @dev The only leg this script wires is outbound to mainnet, so one figure covers it; the spell
     ///      that wires the return leg sets its own.
@@ -84,8 +96,8 @@ contract DeployNewChain is Script {
     ///      wing does. N = 4 gives the governance route's 8 of 15.
     uint8 constant RECV_THRESHOLD = 8;
 
-    /// @dev The LZ-aligned wing: the seven providers on `LZ_GOV_SENDER`'s own optional set, at their
-    ///      addresses on the remote chain. Sorted ascending.
+    /// @dev The LZ-aligned wing at their Base addresses, sorted ascending — replaced per remote,
+    ///      like the `REMOTE_*` constants: every provider has its own address on every chain.
     function _remoteLzDVNs() internal pure returns (address[] memory dvns) {
         dvns = new address[](7);
         dvns[0] = 0x554833698Ae0FB22ECC90B01222903fD62CA4B47; // Canary
@@ -98,8 +110,7 @@ contract DeployNewChain is Script {
     }
 
     /// @dev The token routes run a small required set, not the governance wings: no CCIP or multisig
-    ///      replicas, no threshold. These are the endpoint's own four defaults for the route, which
-    ///      include both providers the live USDS lockbox uses today. Sorted ascending.
+    ///      replicas, no threshold. Base's own four, sorted ascending, replaced per remote.
     function _remoteOftDVNs() internal pure returns (address[] memory dvns) {
         dvns = new address[](4);
         dvns[0] = 0x554833698Ae0FB22ECC90B01222903fD62CA4B47; // Canary
@@ -118,9 +129,22 @@ contract DeployNewChain is Script {
 
     // ============================ script ============================
 
-    function run() external {
-        require(ETH_CCIP_DVN_ADAPTER != address(0), "DeployNewChain/ccip-dvn-adapter-unset");
-        require(SKY_MULTISIG         != address(0), "DeployNewChain/sky-multisig-unset");
+    /// @dev What the run produces, for a spell to consume.
+    struct Deployed {
+        address ccipDvnAdapter;
+        address ccipBroadcaster;
+        address msigBroadcaster;
+        address receiver;
+        address relay;
+        address usds;
+        address usdsAdapter;
+        address susds;
+        address susdsAdapter;
+    }
+
+    function run() public returns (Deployed memory d) {
+        require(_ethCcipDvnAdapter() != address(0), "DeployNewChain/ccip-dvn-adapter-unset");
+        require(_skyMultisig()       != address(0), "DeployNewChain/sky-multisig-unset");
 
         uint256 remoteFork = vm.createFork(vm.envString("BASE_RPC_URL"));
 
@@ -131,8 +155,6 @@ contract DeployNewChain is Script {
         address usdsOft    = LZInit.chainlog.getAddress("USDS_OFT");
         address susdsOft   = LZInit.chainlog.getAddress("SUSDS_OFT");
 
-        address relay;
-
         // --- the new chain: DVN replicas and the governance bridge ---
         {
             vm.selectFork(remoteFork);
@@ -141,44 +163,48 @@ contract DeployNewChain is Script {
             RecvSideDeployer recvDep = new RecvSideDeployer({
                 ccipRouter:        REMOTE_CCIP_ROUTER,
                 endpoint:          ENDPOINT,
-                sourceCcipAdapter: ETH_CCIP_DVN_ADAPTER,
-                multisig:          SKY_MULTISIG,
+                sourceCcipAdapter: _ethCcipDvnAdapter(),
+                multisig:          _skyMultisig(),
                 nCcip:             CCIP_REPLICAS,
                 nMsig:             MSIG_REPLICAS
             });
 
-            relay = _deployGovBridge(govSender, l1GovRelay, recvDep);
+            d.ccipDvnAdapter  = address(recvDep.adapter());
+            d.ccipBroadcaster = address(recvDep.ccipBroadcaster());
+            d.msigBroadcaster = address(recvDep.msigBroadcaster());
+
+            _deployGovBridge(d, govSender, l1GovRelay, recvDep);
 
             vm.stopBroadcast();
 
             console.log("--- new chain ---");
             console.log("RecvSideDeployer:      ", address(recvDep));
-            console.log("CCIP DVN adapter:      ", address(recvDep.adapter()));
-            console.log("CCIP broadcaster:      ", address(recvDep.ccipBroadcaster()));
-            console.log("multisig broadcaster:  ", address(recvDep.msigBroadcaster()));
-            console.log("L2GovernanceRelay:     ", relay);
+            console.log("CCIP DVN adapter:      ", d.ccipDvnAdapter);
+            console.log("CCIP broadcaster:      ", d.ccipBroadcaster);
+            console.log("multisig broadcaster:  ", d.msigBroadcaster);
+            console.log("GovernanceOAppReceiver:", d.receiver);
+            console.log("L2GovernanceRelay:     ", d.relay);
         }
 
         // --- the new chain: the tokens and the adapters that mint them ---
         {
             vm.selectFork(remoteFork);
             vm.startBroadcast();
-            _deployToken("USDS",  usdsOft,  relay, true);
-            _deployToken("SUSDS", susdsOft, relay, false);
+            (d.usds,  d.usdsAdapter)  = _deployToken("USDS",  usdsOft,  d.relay, true);
+            (d.susds, d.susdsAdapter) = _deployToken("SUSDS", susdsOft, d.relay, false);
             vm.stopBroadcast();
         }
 
-        console.log("");
-        console.log("Next, as a spell on mainnet: wireCCIPDVN for this chain's route, then wireGovPeer,");
-        console.log("wireOftPeer and activateOft. DeploySsrBridge takes the relay, both broadcasters and");
-        console.log("the mainnet CCIP DVN adapter from the addresses above.");
     }
 
     // --- helpers ---
 
-    function _deployGovBridge(address govSender, address l1GovRelay, RecvSideDeployer recvDep)
-        internal returns (address)
-    {
+    function _deployGovBridge(
+        Deployed         memory d,
+        address                 govSender,
+        address                 l1GovRelay,
+        RecvSideDeployer        recvDep
+    ) internal {
         address[] memory dvns = GovDvnSet.read(
             address(recvDep.ccipBroadcaster()),
             address(recvDep.msigBroadcaster()),
@@ -195,7 +221,7 @@ contract DeployNewChain is Script {
             cfg:         GovRecvConfig({
                 recvLib:    REMOTE_RECV_LIB,
                 recvUlnCfg: UlnConfig({
-                    confirmations:        CONFIRMATIONS,
+                    confirmations:        ETH_CONFIRMATIONS,
                     requiredDVNCount:     255,  // NIL: explicitly no required DVNs
                     optionalDVNCount:     uint8(dvns.length),
                     optionalDVNThreshold: RECV_THRESHOLD,
@@ -205,53 +231,63 @@ contract DeployNewChain is Script {
             })
         });
 
-        console.log("GovernanceOAppReceiver:", address(govDep.receiver()));
-        return govDep.relay();
+        d.receiver = address(govDep.receiver());
+        d.relay    = govDep.relay();
     }
 
     /// @dev The token, its adapter, and the authority handover: the adapter mints and burns, the relay
     ///      administers, the key keeps nothing.
-    function _deployToken(string memory label, address peer, address relay, bool isUsds) internal {
-        address token;
+    function _deployToken(string memory label, address peer, address relay, bool isUsds)
+        internal returns (address token, address oft)
+    {
         if (isUsds) token = UsdsDeploy.deployL2(msg.sender, msg.sender).usds;
         else        token = SUsdsDeploy.deploy(msg.sender, msg.sender).sUsds;
 
-        L2OFTDeployer dep = new L2OFTDeployer(_oftDeployment(token, peer, relay));
+        oft = address(new L2OFTDeployer(_oftDeployment(token, peer, relay)).oft());
 
-        WardsLike(token).rely(address(dep.oft()));
+        WardsLike(token).rely(oft);
         WardsLike(token).rely(relay);
         WardsLike(token).deny(msg.sender);
 
         console.log(label, "token:  ", token);
-        console.log(label, "adapter:", address(dep.oft()));
+        console.log(label, "adapter:", oft);
     }
 
-    /// @dev Rate limits stay zero: `activateOft` opens them, and requires them zero to do it.
-    function _oftDeployment(address token, address peer, address relay)
-        internal pure returns (L2OftDeployment memory)
-    {
+    function _remoteOftCfg(address peer) internal pure returns (OftConfig memory) {
         address[] memory dvns = _remoteOftDVNs();
-        UlnConfig memory uln  = UlnConfig({
-            confirmations:        CONFIRMATIONS,
+
+        return OftConfig({
+            peer:       peer,
+            sendLib:    REMOTE_SEND_LIB,
+            execCfg:    ExecutorConfig({ maxMessageSize: MAX_MESSAGE_SIZE, executor: REMOTE_EXECUTOR }),
+            sendUlnCfg: _oftUlnCfg(dvns, REMOTE_CONFIRMATIONS),
+            recvLib:    REMOTE_RECV_LIB,
+            recvUlnCfg: _oftUlnCfg(dvns, ETH_CONFIRMATIONS),
+            optionsGas: OFT_OPTIONS_GAS_TO_ETH
+        });
+    }
+
+    function _oftUlnCfg(address[] memory dvns, uint64 confirmations)
+        internal pure returns (UlnConfig memory)
+    {
+        return UlnConfig({
+            confirmations:        confirmations,
             requiredDVNCount:     uint8(dvns.length),
             optionalDVNCount:     0,
             optionalDVNThreshold: 0,
             requiredDVNs:         dvns,
             optionalDVNs:         new address[](0)
         });
+    }
 
+    /// @dev Rate limits stay zero: `activateOft` opens them, and requires them zero to do it.
+    function _oftDeployment(address token, address peer, address relay)
+        internal pure returns (L2OftDeployment memory)
+    {
         RemoteWiring[] memory remotes = new RemoteWiring[](1);
         remotes[0] = RemoteWiring({
             eid:        ETH_EID,
-            cfg:        OftConfig({
-                peer:       peer,
-                sendLib:    REMOTE_SEND_LIB,
-                execCfg:    ExecutorConfig({ maxMessageSize: MAX_MESSAGE_SIZE, executor: REMOTE_EXECUTOR }),
-                sendUlnCfg: uln,
-                recvLib:    REMOTE_RECV_LIB,
-                recvUlnCfg: uln,
-                optionsGas: OFT_OPTIONS_GAS_TO_ETH
-            }),
+            cfg:        _remoteOftCfg(peer),
             rateLimits: RateLimits(0, 0, 0, 0)
         });
 

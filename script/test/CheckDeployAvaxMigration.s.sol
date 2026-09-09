@@ -28,8 +28,6 @@ contract CheckDeployAvaxMigration is DeployAvaxMigration {
     uint128 constant RELAY_GAS     = 500_000;
     uint256 constant RELAY_MAX_FEE = 1 ether;
 
-    /// @dev Stands in for the fill-in the template leaves at zero, so a check needs no edit. Its only
-    ///      role on this side is to hold the multisig DVN wing, which nothing here verifies.
     function _skyMultisig() internal pure override returns (address) {
         return address(0xAAa1);
     }

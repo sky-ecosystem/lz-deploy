@@ -9,6 +9,7 @@ import { SsrRemoteDeployer }    from "src/SsrRemoteDeployer.sol";
 import { SsrForwarderDeployer } from "src/SsrForwarderDeployer.sol";
 
 import { GovDvnSet } from "script/GovDvnSet.sol";
+import { LzDvns }    from "script/LzDvns.sol";
 
 /// @notice Deploys an SSR oracle bridge over LayerZero, pre-filled for Base: the mainnet forwarder,
 ///         and the remote oracle and receiver.
@@ -18,7 +19,7 @@ import { GovDvnSet } from "script/GovDvnSet.sol";
 ///         an SSR bridge can also be added to a chain brought up long ago.
 ///
 ///           BASE_RPC_URL=<base> forge script script/DeploySsrBridge.s.sol:DeploySsrBridge \
-///             --rpc-url <mainnet_rpc> --broadcast --slow --skip-simulation --verify
+///             --rpc-url <mainnet_rpc> --sender <deployer> --broadcast --slow
 ///
 ///         The route duplicates the governance one over the same deployed DVNs: the shared CCIP DVN
 ///         adapter spliced into the LZ-aligned set on the send side, and both Sky wings' replicas plus
@@ -40,9 +41,10 @@ contract DeploySsrBridge is Script {
     address constant ETH_SEND_LIB = 0xbB2Ea70C9E858123480642Cf96acbcCE1372dCe1; // SendUln302
     address constant ETH_EXECUTOR = 0x173272739Bd7Aa6e4e214714048a9fE699453059;
 
-    // The remote chain's own eid and receive library, pre-filled for Base.
-    uint32  constant REMOTE_EID      = 30184;
-    address constant REMOTE_RECV_LIB = 0xc70AB6f32772f59fBfc23889Caf4Ba3376C84bAf; // ReceiveUln302
+    // The remote chain's own references, pre-filled for Base.
+    uint32  constant REMOTE_EID           = 30184;
+    uint64  constant REMOTE_CCIP_SELECTOR = 15971525489660198786;
+    address constant REMOTE_RECV_LIB      = 0xc70AB6f32772f59fBfc23889Caf4Ba3376C84bAf; // ReceiveUln302
 
     /// @dev FILL IN: from the run that brought this chain up. The mainnet CCIP DVN adapter is the
     ///      shared one the governance route uses; the broadcasters and the relay are this chain's.
@@ -50,6 +52,23 @@ contract DeploySsrBridge is Script {
     address constant CCIP_BROADCASTER     = address(0);
     address constant MSIG_BROADCASTER     = address(0);
     address constant L2_GOV_RELAY         = address(0);
+
+    function _ethCcipDvnAdapter() internal view virtual returns (address) {
+        return ETH_CCIP_DVN_ADAPTER;
+    }
+
+    function _l2GovRelay() internal view virtual returns (address) {
+        return L2_GOV_RELAY;
+    }
+
+    /// @dev The replicas of both wings, read off the broadcasters of the run that brought this chain
+    ///      up, alongside the LZ-aligned providers.
+    function _recvDvns() internal view virtual returns (address[] memory) {
+        require(CCIP_BROADCASTER != address(0), "DeploySsrBridge/ccip-broadcaster-unset");
+        require(MSIG_BROADCASTER != address(0), "DeploySsrBridge/msig-broadcaster-unset");
+
+        return GovDvnSet.read(CCIP_BROADCASTER, MSIG_BROADCASTER, _remoteLzDVNs());
+    }
 
     // ============================ LayerZero config ============================
 
@@ -61,7 +80,9 @@ contract DeploySsrBridge is Script {
     uint8 constant SEND_THRESHOLD = 8;
 
     uint32 constant MAX_MESSAGE_SIZE = 10_000;
-    uint64 constant CONFIRMATIONS    = 15;
+
+    /// @dev Ethereum blocks: the forwarder sends from mainnet and the receiver reads that same leg.
+    uint64 constant ETH_CONFIRMATIONS = 15;
 
     /// @dev lzReceive gas on the remote, for the forwarder's one outbound leg.
     uint128 constant OPTIONS_GAS = 100_000;
@@ -76,19 +97,8 @@ contract DeploySsrBridge is Script {
 
     // ============================ governance DVN wings ============================
 
-    /// @dev The LZ-aligned wing at their mainnet addresses, sorted ascending.
-    function _ethLzDVNs() internal pure returns (address[] memory dvns) {
-        dvns = new address[](7);
-        dvns[0] = 0x06559EE34D85a88317Bf0bfE307444116c631b67; // P2P
-        dvns[1] = 0x373a6E5c0C4E89E24819f00AA37ea370917AAfF4; // Deutsche Telekom
-        dvns[2] = 0x380275805876Ff19055EA900CDb2B46a94ecF20D; // Horizen
-        dvns[3] = 0x58249a2Ec05c1978bF21DF1f5eC1847e42455CF4; // Luganodes
-        dvns[4] = 0x589dEDbD617e0CBcB916A9223F4d1300c294236b; // LayerZero Labs
-        dvns[5] = 0xa4fE5A5B9A846458a70Cd0748228aED3bF65c2cd; // Canary
-        dvns[6] = 0xa59BA433ac34D2927232918Ef5B2eaAfcF130BA5; // Nethermind
-    }
-
-    /// @dev The same seven providers at their addresses on the remote chain, sorted ascending.
+    /// @dev The LZ-aligned wing at their Base addresses, sorted ascending — replaced per remote,
+    ///      like the `REMOTE_*` constants: every provider has its own address on every chain.
     function _remoteLzDVNs() internal pure returns (address[] memory dvns) {
         dvns = new address[](7);
         dvns[0] = 0x554833698Ae0FB22ECC90B01222903fD62CA4B47; // Canary
@@ -102,11 +112,16 @@ contract DeploySsrBridge is Script {
 
     // ============================ script ============================
 
-    function run() external {
-        require(ETH_CCIP_DVN_ADAPTER != address(0), "DeploySsrBridge/ccip-dvn-adapter-unset");
-        require(CCIP_BROADCASTER     != address(0), "DeploySsrBridge/ccip-broadcaster-unset");
-        require(MSIG_BROADCASTER     != address(0), "DeploySsrBridge/msig-broadcaster-unset");
-        require(L2_GOV_RELAY         != address(0), "DeploySsrBridge/gov-relay-unset");
+    /// @dev What the run produces, for a spell to consume.
+    struct Deployed {
+        address forwarder;
+        address oracle;
+        address receiver;
+    }
+
+    function run() public returns (Deployed memory d) {
+        require(_ethCcipDvnAdapter() != address(0), "DeploySsrBridge/ccip-dvn-adapter-unset");
+        require(_l2GovRelay()        != address(0), "DeploySsrBridge/gov-relay-unset");
 
         uint256 l1Fork     = vm.activeFork();
         uint256 remoteFork = vm.createFork(vm.envString("BASE_RPC_URL"));
@@ -114,7 +129,7 @@ contract DeploySsrBridge is Script {
         // --- the new chain: the oracle, authorising the receiver of the last step ---
         vm.selectFork(remoteFork);
         vm.startBroadcast();
-        SsrRemoteDeployer remoteDep = new SsrRemoteDeployer(MAX_SSR, L2_GOV_RELAY);
+        SsrRemoteDeployer remoteDep = new SsrRemoteDeployer(MAX_SSR, _l2GovRelay());
         vm.stopBroadcast();
 
         // The deployer lives on this chain, so read its prediction before switching away.
@@ -123,37 +138,45 @@ contract DeploySsrBridge is Script {
         // --- mainnet: the forwarder, against the receiver's predicted address ---
         vm.selectFork(l1Fork);
         vm.startBroadcast();
-        address forwarder = _deployForwarder(predictedReceiver);
+        d.forwarder = _deployForwarder(predictedReceiver);
         vm.stopBroadcast();
 
         // --- the new chain: the receiver, where the forwarder already expects it ---
         vm.selectFork(remoteFork);
         vm.startBroadcast();
-        _deployReceiver(remoteDep, forwarder);
+        _deployReceiver(remoteDep, d.forwarder);
         vm.stopBroadcast();
 
+        d.oracle   = address(remoteDep.oracle());
+        d.receiver = address(remoteDep.receiver());
+
         console.log("--- mainnet ---");
-        console.log("SSROracleForwarderLZ:", forwarder);
+        console.log("SSROracleForwarderLZ:", d.forwarder);
         console.log("--- new chain ---");
         console.log("SsrRemoteDeployer:   ", address(remoteDep));
-        console.log("SSRAuthOracle:       ", address(remoteDep.oracle()));
-        console.log("LZComposeReceiver:   ", address(remoteDep.receiver()));
-        console.log("");
-        console.log("Next, as a spell: activateSsrForwarder on mainnet.");
+        console.log("SSRAuthOracle:       ", d.oracle);
+        console.log("LZComposeReceiver:   ", d.receiver);
     }
 
     // --- helpers ---
 
     function _deployForwarder(address receiver) internal returns (address) {
-        (address[] memory dvns, uint256 ccipDvnIndex) =
-            GovDvnSet.insertSorted(_ethLzDVNs(), ETH_CCIP_DVN_ADAPTER);
+        SsrForwarderDeployer dep = new SsrForwarderDeployer(REMOTE_EID, _forwarderCfg(receiver));
 
-        SsrForwarderDeployer dep = new SsrForwarderDeployer(REMOTE_EID, ForwarderConfig({
+        console.log("SsrForwarderDeployer:", address(dep));
+        return address(dep.forwarder());
+    }
+
+    function _forwarderCfg(address receiver) internal view returns (ForwarderConfig memory) {
+        (address[] memory dvns, uint256 ccipDvnIndex) =
+            GovDvnSet.insertSorted(LzDvns.ethGovDVNs(), _ethCcipDvnAdapter());
+
+        return ForwarderConfig({
             peer:         receiver,
             sendLib:      ETH_SEND_LIB,
             execCfg:      ExecutorConfig({ maxMessageSize: MAX_MESSAGE_SIZE, executor: ETH_EXECUTOR }),
             sendUlnCfg:   UlnConfig({
-                confirmations:        CONFIRMATIONS,
+                confirmations:        ETH_CONFIRMATIONS,
                 requiredDVNCount:     255,       // NIL: explicitly no required DVNs
                 optionalDVNCount:     uint8(dvns.length),
                 optionalDVNThreshold: SEND_THRESHOLD,
@@ -163,28 +186,25 @@ contract DeploySsrBridge is Script {
             ccipDvnIndex: ccipDvnIndex,
             optionsGas:   OPTIONS_GAS,
             composeGas:   COMPOSE_GAS
-        }));
-
-        console.log("SsrForwarderDeployer:", address(dep));
-        return address(dep.forwarder());
+        });
     }
 
     function _deployReceiver(SsrRemoteDeployer remoteDep, address forwarder) internal {
-        address[] memory dvns = GovDvnSet.read(CCIP_BROADCASTER, MSIG_BROADCASTER, _remoteLzDVNs());
+        address[] memory dvns = _recvDvns();
 
         remoteDep.deployReceiver({
             endpoint:   ENDPOINT,
             forwarder:  forwarder,
             recvLib:    REMOTE_RECV_LIB,
             recvUlnCfg: UlnConfig({
-                confirmations:        CONFIRMATIONS,
+                confirmations:        ETH_CONFIRMATIONS,
                 requiredDVNCount:     255,       // NIL: explicitly no required DVNs
                 optionalDVNCount:     uint8(dvns.length),
                 optionalDVNThreshold: RECV_THRESHOLD,
                 requiredDVNs:         new address[](0),
                 optionalDVNs:         dvns
             }),
-            gov:        L2_GOV_RELAY             // the relay owns the receiver and is its delegate
+            gov:        _l2GovRelay()            // the relay owns the receiver and is its delegate
         });
     }
 }
