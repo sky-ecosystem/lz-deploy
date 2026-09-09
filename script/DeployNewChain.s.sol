@@ -108,8 +108,11 @@ contract DeployNewChain is Script {
         dvns[3] = 0xcd37CA043f8479064e10635020c65FfC005d36f6; // Nethermind
     }
 
-    /// @dev None by default; pausing is a per-chain operational choice.
-    function _pausers() internal pure returns (address[] memory) {
+    // ============================ OFT adapter inputs ============================
+
+    RateLimitAccountingType constant PER_EID_ACCOUNTING = RateLimitAccountingType.Net;
+
+    function _remotePausers() internal pure returns (address[] memory) {
         return new address[](0);
     }
 
@@ -255,11 +258,10 @@ contract DeployNewChain is Script {
         return L2OftDeployment({
             token:          token,
             endpoint:       ENDPOINT,
-            accountingType: RateLimitAccountingType.Net,
-            pausers:        _pausers(),
+            accountingType: PER_EID_ACCOUNTING,
+            pausers:        _remotePausers(),
             remotes:        remotes,
             gov:            relay
         });
     }
-
 }

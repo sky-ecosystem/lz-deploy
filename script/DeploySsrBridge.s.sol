@@ -33,6 +33,8 @@ import { GovDvnSet } from "script/GovDvnSet.sol";
 ///         `getFee` and `assignJob` on that allowlist.
 contract DeploySsrBridge is Script {
 
+    // ============================ fixed references ============================
+
     address constant ENDPOINT = 0x1a44076050125825900e736c501f859c50fE728c;
 
     address constant ETH_SEND_LIB = 0xbB2Ea70C9E858123480642Cf96acbcCE1372dCe1; // SendUln302
@@ -49,11 +51,14 @@ contract DeploySsrBridge is Script {
     address constant MSIG_BROADCASTER     = address(0);
     address constant L2_GOV_RELAY         = address(0);
 
+    // ============================ LayerZero config ============================
+
     /// @dev The governance route's 8 of 15: any two DVN wings reach it, no single wing does.
     uint8 constant RECV_THRESHOLD = 8;
 
-    /// @dev The live governance send route's threshold over its optional set.
-    uint8 constant SEND_THRESHOLD = 4;
+    /// @dev The whole send set: nothing enforces this threshold — every DVN in the set is assigned
+    ///      and paid, and delivery is gated by the destination's — it only has to exceed 1.
+    uint8 constant SEND_THRESHOLD = 8;
 
     uint32 constant MAX_MESSAGE_SIZE = 10_000;
     uint64 constant CONFIRMATIONS    = 15;
@@ -68,6 +73,8 @@ contract DeploySsrBridge is Script {
     /// @dev Cap on the SSR the oracle accepts. Zero means none, which is the default here: the relay
     ///      holds the oracle's admin role, so governance can set one later.
     uint256 constant MAX_SSR = 0;
+
+    // ============================ governance DVN wings ============================
 
     /// @dev The LZ-aligned wing at their mainnet addresses, sorted ascending.
     function _ethLzDVNs() internal pure returns (address[] memory dvns) {
@@ -93,13 +100,15 @@ contract DeploySsrBridge is Script {
         dvns[6] = 0xcd37CA043f8479064e10635020c65FfC005d36f6; // Nethermind
     }
 
+    // ============================ script ============================
+
     function run() external {
         require(ETH_CCIP_DVN_ADAPTER != address(0), "DeploySsrBridge/ccip-dvn-adapter-unset");
         require(CCIP_BROADCASTER     != address(0), "DeploySsrBridge/ccip-broadcaster-unset");
         require(MSIG_BROADCASTER     != address(0), "DeploySsrBridge/msig-broadcaster-unset");
         require(L2_GOV_RELAY         != address(0), "DeploySsrBridge/gov-relay-unset");
 
-        uint256 l1Fork   = vm.activeFork();
+        uint256 l1Fork     = vm.activeFork();
         uint256 remoteFork = vm.createFork(vm.envString("BASE_RPC_URL"));
 
         // --- the new chain: the oracle, authorising the receiver of the last step ---

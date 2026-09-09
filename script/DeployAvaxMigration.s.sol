@@ -27,14 +27,12 @@ import { L2OFTDeployer, L2OftDeployment, RemoteWiring as L2RemoteWiring } from "
 ///
 ///           AVAX_RPC_URL=<avalanche> forge script \
 ///             script/DeployAvaxMigration.s.sol:DeployAvaxMigration \
-///             --rpc-url <mainnet_rpc> --broadcast --slow --skip-simulation --verify
+///             --rpc-url <mainnet_rpc> --sender <deployer> --broadcast --slow
 ///
 ///         Avalanche is deployed first, against *predicted* mainnet lockbox addresses, because each
-///         side's peer is the other and both are wired in their constructors. Predicting the mainnet
-///         side is the safe direction: if the prediction misses, the run reverts before anything on
-///         mainnet is handed to the pause proxy, and the Avalanche contracts — which nothing points
-///         at yet — are simply redeployed. The prediction assumes the two lockbox deployments are the
-///         broadcaster's next two mainnet transactions.
+///         side's peer is the other and both are wired in their constructors. The prediction is made
+///         for `--sender`, and assumes the two lockbox deployments are that account's next two
+///         mainnet transactions; anything else in between makes the run revert.
 ///
 ///         The libraries and confirmations below are each endpoint's own defaults for the route;
 ///         everything available from the chainlog is read from it.
@@ -71,6 +69,10 @@ contract DeployAvaxMigration is Script {
     /// @dev FILL IN: the Sky Safe on Avalanche, which drives the multisig DVN wing.
     address constant SKY_MULTISIG = address(0);
 
+    function _skyMultisig() internal pure virtual returns (address) {
+        return SKY_MULTISIG;
+    }
+
     uint8 constant CCIP_REPLICAS = 4;
     uint8 constant MSIG_REPLICAS = 4;
 
@@ -78,8 +80,9 @@ contract DeployAvaxMigration is Script {
     ///      wing does. N = 4 gives the governance route's 8 of 15.
     uint8 constant GOV_RECV_THRESHOLD = 8;
 
-    /// @dev The live governance send route's threshold over its optional set.
-    uint8 constant GOV_SEND_THRESHOLD = 4;
+    /// @dev The whole send set: nothing enforces this threshold — every DVN in the set is assigned
+    ///      and paid, and delivery is gated by the destination's — it only has to exceed 1.
+    uint8 constant GOV_SEND_THRESHOLD = 8;
 
     uint128 constant CCIP_GAS = 200_000;
 
@@ -137,12 +140,16 @@ contract DeployAvaxMigration is Script {
         dvns[3] = 0xcC49E6fca014c77E1Eb604351cc1E08C84511760; // Canary
     }
 
-    // ============================ accounting ============================
+    // ============================ OFT adapter inputs ============================
 
     RateLimitAccountingType constant PER_EID_ACCOUNTING   = RateLimitAccountingType.Net;
     RateLimitAccountingType constant AGGREGATE_ACCOUNTING = RateLimitAccountingType.Net;
 
-    function _pausers() internal pure returns (address[] memory) {
+    function _ethPausers() internal pure returns (address[] memory) {
+        return new address[](0);
+    }
+
+    function _avaxPausers() internal pure returns (address[] memory) {
         return new address[](0);
     }
 
@@ -175,8 +182,8 @@ contract DeployAvaxMigration is Script {
 
     // ============================ script ============================
 
-    function run() external {
-        require(SKY_MULTISIG != address(0), "DeployAvaxMigration/sky-multisig-unset");
+    function run() public returns (Deployed memory d) {
+        require(_skyMultisig() != address(0), "DeployAvaxMigration/sky-multisig-unset");
 
         uint256 l1Fork   = vm.activeFork();
         uint256 avaxFork = vm.createFork(vm.envString("AVAX_RPC_URL"));
@@ -186,8 +193,6 @@ contract DeployAvaxMigration is Script {
         address l1GovRelay = LZInit.chainlog.getAddress("LZ_GOV_RELAY");
         address usds       = LZInit.chainlog.getAddress("USDS");
         address susds      = LZInit.chainlog.getAddress("SUSDS");
-
-        Deployed memory d;
 
         // --- mainnet: the CCIP DVN adapter, allowlisting the governance sender ---
         vm.selectFork(l1Fork);
@@ -215,7 +220,7 @@ contract DeployAvaxMigration is Script {
         vm.stopBroadcast();
 
         // The replicas are Avalanche contracts, so read the receive-side set before switching back.
-        address[] memory recvDvns = GovDvnSet.read(d.ccipBroadcaster, d.msigBroadcaster, _avaxLzDVNs());
+        d.recvDvns = GovDvnSet.read(d.ccipBroadcaster, d.msigBroadcaster, _avaxLzDVNs());
 
         // --- mainnet: the two lockboxes, then the adapter's route to Avalanche and its handoff ---
         vm.selectFork(l1Fork);
@@ -223,24 +228,14 @@ contract DeployAvaxMigration is Script {
 
         _deployLockboxes(d, usds, susds);
 
-        sendDep.configure(CCIPDVNCfg({
-            remoteEid:               AVAX_EID,
-            remoteCcipChainSelector: AVAX_CCIP_SELECTOR,
-            remoteCcipAdapter:       d.avaxCcipAdapter,
-            remoteCcipBroadcaster:   d.ccipBroadcaster,
-            sendLib:                 ETH_SEND_LIB,
-            multiplierBps:           0,       // the adapter's break-even default
-            gas:                     CCIP_GAS
-        }));
-
         (bool funded, ) = d.ethCcipAdapter.call{ value: ADAPTER_FUND }("");
         require(funded, "DeployAvaxMigration/adapter-fund-failed");
 
-        sendDep.handOff(new address[](0));    // the governance sender stays allowlisted
+        _routeSendSide(sendDep, d);
 
         vm.stopBroadcast();
 
-        _log(d, address(sendDep), recvDep, recvDvns);
+        _log(d, address(sendDep), recvDep);
     }
 
     /// @dev Everything the run produces, carried between steps so no frame holds them all.
@@ -255,6 +250,23 @@ contract DeployAvaxMigration is Script {
         address avaxSusdsOft;
         address usdsLockbox;
         address susdsLockbox;
+        address[] recvDvns;
+    }
+
+    /// @dev Its own function to keep `run()` clear of the stack depth this struct costs. The
+    ///      handoff leaves the governance sender allowlisted, so the revocation array is empty.
+    function _routeSendSide(SendSideDeployer sendDep, Deployed memory d) internal {
+        sendDep.configure(CCIPDVNCfg({
+            remoteEid:               AVAX_EID,
+            remoteCcipChainSelector: AVAX_CCIP_SELECTOR,
+            remoteCcipAdapter:       d.avaxCcipAdapter,
+            remoteCcipBroadcaster:   d.ccipBroadcaster,
+            sendLib:                 ETH_SEND_LIB,
+            multiplierBps:           0,       // the adapter's break-even default
+            gas:                     CCIP_GAS
+        }));
+
+        sendDep.handOff(new address[](0));
     }
 
     function _deployAvalanche(Deployed memory d, address l1GovRelay)
@@ -264,7 +276,7 @@ contract DeployAvaxMigration is Script {
             ccipRouter:        AVAX_CCIP_ROUTER,
             endpoint:          AVAX_ENDPOINT,
             sourceCcipAdapter: d.ethCcipAdapter,
-            multisig:          SKY_MULTISIG,
+            multisig:          _skyMultisig(),
             nCcip:             CCIP_REPLICAS,
             nMsig:             MSIG_REPLICAS
         });
@@ -294,12 +306,7 @@ contract DeployAvaxMigration is Script {
         require(susdsOft == d.susdsLockbox, "DeployAvaxMigration/susds-lockbox-mismatch");
     }
 
-    function _log(
-        Deployed         memory d,
-        address                 sendDep,
-        RecvSideDeployer        recvDep,
-        address[]        memory recvDvns
-    ) internal view {
+    function _log(Deployed memory d, address sendDep, RecvSideDeployer recvDep) internal pure {
         console.log("--- mainnet (owned by MCD_PAUSE_PROXY) ---");
         console.log("SendSideDeployer:       ", sendDep);
         console.log("CCIP DVN adapter:       ", d.ethCcipAdapter);
@@ -313,13 +320,7 @@ contract DeployAvaxMigration is Script {
         console.log("USDS  adapter:          ", d.avaxUsdsOft);
         console.log("SUSDS adapter:          ", d.avaxSusdsOft);
 
-        _logGovUlnSets(d, recvDvns);
-
-        console.log("");
-        console.log("Next: fill the spell's AvaxMigration struct with the addresses above - lockboxes");
-        console.log("as usds/susds, adapters as avaxUsds/avaxSusds, the new relay as newL2GovRelay, and");
-        console.log("the spell as l2Spell. Each lockbox's implementation is at its own nonce 1. Token");
-        console.log("authority is moved by the spell.");
+        _logGovUlnSets(d);
     }
 
     // --- helpers ---
@@ -327,20 +328,49 @@ contract DeployAvaxMigration is Script {
     /// @dev The governance route is the spell's to install, so print the two sets it takes: the send
     ///      side with the adapter spliced into the LZ-aligned providers, and the receive side with
     ///      both wings' replicas alongside them.
-    function _logGovUlnSets(Deployed memory d, address[] memory recvDvns) internal view {
-        (address[] memory sendDvns, uint256 ccipDvnIndex) =
-            GovDvnSet.insertSorted(_ethLzDVNs(), d.ethCcipAdapter);
+    function _logGovUlnSets(Deployed memory d) internal pure {
+        (UlnConfig memory sendUlnCfg, uint256 ccipDvnIndex) = _govSendUlnCfg(d.ethCcipAdapter);
+        UlnConfig memory recvUlnCfg = _govRecvUlnCfg(d.recvDvns);
 
         console.log("");
         console.log("Governance send set for the spell's sendUlnCfg - 255 required (NIL), optional");
-        console.log(GOV_SEND_THRESHOLD, "of", sendDvns.length);
-        for (uint256 i; i < sendDvns.length; ++i) console.log("  ", sendDvns[i]);
+        console.log(sendUlnCfg.optionalDVNThreshold, "of", sendUlnCfg.optionalDVNCount);
+        for (uint256 i; i < sendUlnCfg.optionalDVNs.length; ++i) console.log("  ", sendUlnCfg.optionalDVNs[i]);
         console.log("ccipDvnIndex:", ccipDvnIndex);
 
         console.log("");
         console.log("Governance receive set for migrateAvaxRemote's recvUlnCfg - optional");
-        console.log(GOV_RECV_THRESHOLD, "of", recvDvns.length);
-        for (uint256 i; i < recvDvns.length; ++i) console.log("  ", recvDvns[i]);
+        console.log(recvUlnCfg.optionalDVNThreshold, "of", recvUlnCfg.optionalDVNCount);
+        for (uint256 i; i < recvUlnCfg.optionalDVNs.length; ++i) console.log("  ", recvUlnCfg.optionalDVNs[i]);
+    }
+
+    /// @dev The adapter spliced into the LZ-aligned providers, and the index the spell dereferences
+    ///      to find it.
+    function _govSendUlnCfg(address l1Adapter)
+        internal pure returns (UlnConfig memory, uint256 ccipDvnIndex)
+    {
+        address[] memory dvns;
+        (dvns, ccipDvnIndex) = GovDvnSet.insertSorted(_ethLzDVNs(), l1Adapter);
+
+        return (UlnConfig({
+            confirmations:        ETH_CONFIRMATIONS,
+            requiredDVNCount:     255,       // NIL: explicitly no required DVNs
+            optionalDVNCount:     uint8(dvns.length),
+            optionalDVNThreshold: GOV_SEND_THRESHOLD,
+            requiredDVNs:         new address[](0),
+            optionalDVNs:         dvns
+        }), ccipDvnIndex);
+    }
+
+    function _govRecvUlnCfg(address[] memory recvDvns) internal pure returns (UlnConfig memory) {
+        return UlnConfig({
+            confirmations:        AVAX_CONFIRMATIONS,
+            requiredDVNCount:     255,
+            optionalDVNCount:     uint8(recvDvns.length),
+            optionalDVNThreshold: GOV_RECV_THRESHOLD,
+            requiredDVNs:         new address[](0),
+            optionalDVNs:         recvDvns
+        });
     }
 
     /// @dev A contract's nonce starts at 1 (EIP-161); the implementation takes 1 and the proxy 2.
@@ -352,8 +382,7 @@ contract DeployAvaxMigration is Script {
         L2RemoteWiring[] memory remotes = new L2RemoteWiring[](1);
         remotes[0] = L2RemoteWiring({
             eid:        ETH_EID,
-            cfg:        _oftCfg(peer, AVAX_SEND_LIB, AVAX_RECV_LIB, AVAX_EXECUTOR, _avaxOftDVNs(),
-                                AVAX_CONFIRMATIONS, AVAX_TO_ETH_OPTIONS_GAS),
+            cfg:        _avaxOftCfg(peer),
             rateLimits: RateLimits(0, 0, 0, 0)  // the spell opens them
         });
 
@@ -361,7 +390,7 @@ contract DeployAvaxMigration is Script {
             token:          token,
             endpoint:       AVAX_ENDPOINT,
             accountingType: PER_EID_ACCOUNTING,
-            pausers:        _pausers(),
+            pausers:        _avaxPausers(),
             remotes:        remotes,
             gov:            OLD_AVAX_GOV_RELAY
         });
@@ -373,8 +402,7 @@ contract DeployAvaxMigration is Script {
         L1RemoteWiring[] memory remotes = new L1RemoteWiring[](1);
         remotes[0] = L1RemoteWiring({
             eid:        AVAX_EID,
-            cfg:        _oftCfg(peer, ETH_SEND_LIB, ETH_RECV_LIB, ETH_EXECUTOR, _ethOftDVNs(),
-                                ETH_CONFIRMATIONS, ETH_TO_AVAX_OPTIONS_GAS),
+            cfg:        _l1OftCfg(peer),
             rateLimits: RateLimits(0, 0, 0, 0)  // the spell opens them
         });
 
@@ -383,9 +411,19 @@ contract DeployAvaxMigration is Script {
             accountingType:          PER_EID_ACCOUNTING,
             aggregateAccountingType: AGGREGATE_ACCOUNTING,
             globalLimits:            RateLimits(0, 0, 0, 0),  // the spell sets the global cap
-            pausers:                 _pausers(),
+            pausers:                 _ethPausers(),
             remotes:                 remotes
         });
+    }
+
+    function _l1OftCfg(address peer) internal pure returns (OftConfig memory) {
+        return _oftCfg(peer, ETH_SEND_LIB, ETH_RECV_LIB, ETH_EXECUTOR, _ethOftDVNs(),
+                       ETH_CONFIRMATIONS, ETH_TO_AVAX_OPTIONS_GAS);
+    }
+
+    function _avaxOftCfg(address peer) internal pure returns (OftConfig memory) {
+        return _oftCfg(peer, AVAX_SEND_LIB, AVAX_RECV_LIB, AVAX_EXECUTOR, _avaxOftDVNs(),
+                       AVAX_CONFIRMATIONS, AVAX_TO_ETH_OPTIONS_GAS);
     }
 
     function _oftCfg(
