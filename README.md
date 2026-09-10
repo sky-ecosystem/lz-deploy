@@ -58,8 +58,8 @@ src/L2SsrBridgeDeployer.sol      remote:    SSRAuthOracle + LZComposeReceiver
 
 ### An SSR bridge
 
-Each half holds the other's address immutably, so the remote deployer publishes where its receiver
-will land and the forwarder is built against that.
+Each half holds the other's address immutably, so the L2 deployer publishes where its receiver will
+land and the forwarder is built against that.
 
 1. `L2SsrBridgeDeployer(maxSSR, oracleAdmin)` on the remote — deploys the oracle, authorises the
    receiver of step 3 on it, and settles its admin role.

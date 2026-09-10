@@ -25,10 +25,10 @@ import { L2OFTDeployer, L2OftDeployment, RemoteWiring as L2RemoteWiring } from "
 
 /// @notice Deployer-side bundle for the Avalanche migration: everything `LZAvaxMigrationInit` expects
 ///         to already exist when the spell runs.
-/// @dev    Run with mainnet as the active fork and `AVAX_RPC_URL` set:
+/// @dev    Run with mainnet as the active fork. The Avalanche fork is `AVALANCHE_RPC_URL` when set,
+///         and forge's own endpoint for the chain otherwise:
 ///
-///           AVAX_RPC_URL=<avalanche> forge script \
-///             script/DeployAvaxMigration.s.sol:DeployAvaxMigration \
+///           forge script script/DeployAvaxMigration.s.sol:DeployAvaxMigration \
 ///             --rpc-url <mainnet_rpc> --sender <deployer> --broadcast --slow
 ///
 ///         Avalanche is deployed first, against *predicted* mainnet lockbox addresses, because each
@@ -162,11 +162,13 @@ contract DeployAvaxMigration is Script {
 
     // ============================ script ============================
 
-    function run() public returns (Deployed memory d) {
+    /// @return d        every address the spell then consumes
+    /// @return avaxFork the Avalanche fork this run created, for a caller relaying the spell's message
+    function run() public returns (Deployed memory d, uint256 avaxFork) {
         require(_skyMultisig() != address(0), "DeployAvaxMigration/sky-multisig-unset");
 
-        uint256 l1Fork   = vm.activeFork();
-        uint256 avaxFork = vm.createFork(vm.envString("AVAX_RPC_URL"));
+        uint256 l1Fork = vm.activeFork();
+        avaxFork       = vm.createFork(getChain("avalanche").rpcUrl);
 
         // Read while mainnet is the active fork: the chainlog is a mainnet contract.
         address govSender  = LZInit.chainlog.getAddress("LZ_GOV_SENDER");
@@ -227,9 +229,13 @@ contract DeployAvaxMigration is Script {
         address newRelay;
         address l2Spell;
         address avaxUsdsOft;
+        address avaxUsdsOftImp;
         address avaxSusdsOft;
+        address avaxSusdsOftImp;
         address usdsLockbox;
+        address usdsLockboxImp;
         address susdsLockbox;
+        address susdsLockboxImp;
         address[] recvDvns;
     }
 
@@ -273,17 +279,26 @@ contract DeployAvaxMigration is Script {
             bud:               _bud()
         });
 
-        d.l2Spell      = address(new LZAvaxMigrationL2Spell());
-        d.avaxUsdsOft  = address(new L2OFTDeployer(_avaxDeployment(AVAX_USDS,  d.usdsLockbox)).oft());
-        d.avaxSusdsOft = address(new L2OFTDeployer(_avaxDeployment(AVAX_SUSDS, d.susdsLockbox)).oft());
+        d.l2Spell = address(new LZAvaxMigrationL2Spell());
+
+        L2OFTDeployer usdsDep  = new L2OFTDeployer(_avaxDeployment(AVAX_USDS,  d.usdsLockbox));
+        L2OFTDeployer susdsDep = new L2OFTDeployer(_avaxDeployment(AVAX_SUSDS, d.susdsLockbox));
+
+        d.avaxUsdsOft     = address(usdsDep.oft());
+        d.avaxUsdsOftImp  = usdsDep.implementation();
+        d.avaxSusdsOft    = address(susdsDep.oft());
+        d.avaxSusdsOftImp = susdsDep.implementation();
     }
 
     function _deployLockboxes(Deployed memory d, address usds, address susds) internal {
-        address usdsOft  = address(new L1OFTDeployer(_l1Deployment(usds,  d.avaxUsdsOft)).oft());
-        address susdsOft = address(new L1OFTDeployer(_l1Deployment(susds, d.avaxSusdsOft)).oft());
+        L1OFTDeployer usdsDep  = new L1OFTDeployer(_l1Deployment(usds,  d.avaxUsdsOft));
+        L1OFTDeployer susdsDep = new L1OFTDeployer(_l1Deployment(susds, d.avaxSusdsOft));
 
-        require(usdsOft  == d.usdsLockbox,  "DeployAvaxMigration/usds-lockbox-mismatch");
-        require(susdsOft == d.susdsLockbox, "DeployAvaxMigration/susds-lockbox-mismatch");
+        require(address(usdsDep.oft())  == d.usdsLockbox,  "DeployAvaxMigration/usds-lockbox-mismatch");
+        require(address(susdsDep.oft()) == d.susdsLockbox, "DeployAvaxMigration/susds-lockbox-mismatch");
+
+        d.usdsLockboxImp  = usdsDep.implementation();
+        d.susdsLockboxImp = susdsDep.implementation();
     }
 
     function _log(Deployed memory d, address sendDep, RecvSideDeployer recvDep) internal pure {
@@ -291,14 +306,18 @@ contract DeployAvaxMigration is Script {
         console.log("SendSideDeployer:       ", sendDep);
         console.log("CCIP DVN adapter:       ", d.ethCcipAdapter);
         console.log("USDS  lockbox:          ", d.usdsLockbox);
+        console.log("USDS  lockbox imp:      ", d.usdsLockboxImp);
         console.log("SUSDS lockbox:          ", d.susdsLockbox);
+        console.log("SUSDS lockbox imp:      ", d.susdsLockboxImp);
         console.log("--- avalanche (owned by the OLD relay until the spell) ---");
         console.log("RecvSideDeployer:       ", address(recvDep));
         console.log("CCIP DVN adapter:       ", d.avaxCcipAdapter);
         console.log("L2GovernanceRelay (new):", d.newRelay);
         console.log("LZAvaxMigrationL2Spell: ", d.l2Spell);
         console.log("USDS  adapter:          ", d.avaxUsdsOft);
+        console.log("USDS  adapter imp:      ", d.avaxUsdsOftImp);
         console.log("SUSDS adapter:          ", d.avaxSusdsOft);
+        console.log("SUSDS adapter imp:      ", d.avaxSusdsOftImp);
 
         _logGovUlnSets(d);
     }

@@ -13,12 +13,13 @@ import { LzDvns }    from "script/LzDvns.sol";
 
 /// @notice Deploys an SSR oracle bridge over LayerZero, pre-filled for Base: the mainnet forwarder,
 ///         and the remote oracle and receiver.
-/// @dev    Run with mainnet as the active fork and `BASE_RPC_URL` set, after `DeployNewChain`, which
-///         deploys the DVN infrastructure this reuses and the relay it hands to. Those four addresses
-///         are filled in below rather than read from a file: the two runs need not be consecutive, and
-///         an SSR bridge can also be added to a chain brought up long ago.
+/// @dev    Run with mainnet as the active fork, after `DeployNewChain`, which deploys the DVN
+///         infrastructure this reuses and the relay it hands to. Those four addresses are filled in
+///         below rather than read from a file: the two runs need not be consecutive, and an SSR bridge
+///         can also be added to a chain brought up long ago. The remote fork is `BASE_RPC_URL` when
+///         set, and forge's own endpoint for the chain otherwise.
 ///
-///           BASE_RPC_URL=<base> forge script script/DeploySsrBridge.s.sol:DeploySsrBridge \
+///           forge script script/DeploySsrBridge.s.sol:DeploySsrBridge \
 ///             --rpc-url <mainnet_rpc> --sender <deployer> --broadcast --slow
 ///
 ///         The route duplicates the governance one over the same deployed DVNs: the shared CCIP DVN
@@ -119,12 +120,14 @@ contract DeploySsrBridge is Script {
         address receiver;
     }
 
-    function run() public returns (Deployed memory d) {
+    /// @return d          the two halves of the bridge
+    /// @return remoteFork the fork this run created, for a caller relaying the forwarder's message
+    function run() public returns (Deployed memory d, uint256 remoteFork) {
         require(_ethCcipDvnAdapter() != address(0), "DeploySsrBridge/ccip-dvn-adapter-unset");
         require(_l2GovRelay()        != address(0), "DeploySsrBridge/gov-relay-unset");
 
-        uint256 l1Fork     = vm.activeFork();
-        uint256 remoteFork = vm.createFork(vm.envString("BASE_RPC_URL"));
+        uint256 l1Fork = vm.activeFork();
+        remoteFork     = vm.createFork(getChain("base").rpcUrl);
 
         // --- the new chain: the oracle, authorising the receiver of the last step ---
         vm.selectFork(remoteFork);
@@ -153,7 +156,7 @@ contract DeploySsrBridge is Script {
         console.log("--- mainnet ---");
         console.log("SSROracleForwarderLZ:", d.forwarder);
         console.log("--- new chain ---");
-        console.log("L2SsrBridgeDeployer:   ", address(remoteDep));
+        console.log("L2SsrBridgeDeployer: ", address(remoteDep));
         console.log("SSRAuthOracle:       ", d.oracle);
         console.log("LZComposeReceiver:   ", d.receiver);
     }
@@ -163,7 +166,7 @@ contract DeploySsrBridge is Script {
     function _deployForwarder(address receiver) internal returns (address) {
         L1SsrBridgeDeployer dep = new L1SsrBridgeDeployer(REMOTE_EID, _forwarderCfg(receiver));
 
-        console.log("L1SsrBridgeDeployer:", address(dep));
+        console.log("L1SsrBridgeDeployer: ", address(dep));
         return address(dep.forwarder());
     }
 

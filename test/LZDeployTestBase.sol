@@ -3,13 +3,18 @@ pragma solidity ^0.8.24;
 
 import { Test } from "forge-std/Test.sol";
 
+import { Domain, DomainHelpers } from "xchain-helpers/testing/Domain.sol";
+
 import { LZInit, UlnConfig, ExecutorConfig } from "lz-init-lib/LZInit.sol";
 
 /// @notice Shared mainnet-fork setup for the deployer tests.
-/// @dev    The remote-side deployers are exercised on a mainnet fork too: what they configure is
-///         endpoint and OApp state, which is chain-agnostic, and their L2-specific inputs (token,
-///         relay, DVN set) are parameters. The constants below are the live mainnet deployments.
+/// @dev    A remote-side deployer is exercised on this fork too wherever no message has to cross:
+///         what it configures is endpoint and OApp state, which is chain-agnostic, and its L2-specific
+///         inputs (token, relay, DVN set) are parameters. A suite that does relay a message forks the
+///         remote chain itself. The constants below are the live mainnet deployments.
 abstract contract LZDeployTestBase is Test {
+
+    using DomainHelpers for *;
 
     address constant ENDPOINT = 0x1a44076050125825900e736c501f859c50fE728c;
     address constant SEND_LIB = 0xbB2Ea70C9E858123480642Cf96acbcCE1372dCe1; // SendUln302
@@ -26,13 +31,22 @@ abstract contract LZDeployTestBase is Test {
     address constant DVN_NETHERMIND       = 0xa59BA433ac34D2927232918Ef5B2eaAfcF130BA5;
 
     uint32 constant ETH_EID  = 30101;
-    uint32 constant DST_EID  = 30184; // Base, standing in for "the other side of the route"
+    uint32 constant DST_EID  = 30184; // Base, the remote side of the route
 
     uint128 constant OFT_OPTIONS_GAS = 130_000;
 
     /// @dev The suite asserts against live mainnet state, so the block is pinned rather than
     ///      overridable: at another height those references are different values.
     uint256 constant FORK_BLOCK = 24871363;
+
+    /// @dev Base's own references, for the suites that fork it to relay a message. That fork carries
+    ///      no state they assert, only the endpoint and the library a deployer wires, so its height
+    ///      only has to be no earlier than mainnet's — the SSR oracle rejects data timestamped in its
+    ///      future.
+    address constant REMOTE_RECV_LIB   = 0xc70AB6f32772f59fBfc23889Caf4Ba3376C84bAf; // ReceiveUln302
+    uint256 constant REMOTE_FORK_BLOCK = 51000000;
+
+    Domain mainnet;
 
     address PAUSE_PROXY;
     address GOV_SENDER;
@@ -43,9 +57,18 @@ abstract contract LZDeployTestBase is Test {
     UlnConfig      oftSendUlnCfg;
     UlnConfig      oftRecvUlnCfg;
     UlnConfig      govUlnCfg;
+    UlnConfig      remoteGovUlnCfg;
 
     function setUp() public virtual {
-        vm.createSelectFork(getChain("mainnet").rpcUrl, FORK_BLOCK);
+        // The one endpoint the suites cannot do without: forge's fallback for mainnet is not an
+        // archive node, so it cannot serve a pinned block, and relaying a message reads this variable
+        // directly. A remote chain's is optional — any node serves what those forks are used for.
+        require(
+            bytes(vm.envOr("MAINNET_RPC_URL", string(""))).length > 0,
+            "LZDeployTestBase/MAINNET_RPC_URL-unset"
+        );
+
+        mainnet = getChain("mainnet").createSelectFork(FORK_BLOCK);
 
         PAUSE_PROXY  = LZInit.chainlog.getAddress("MCD_PAUSE_PROXY");
         GOV_SENDER   = LZInit.chainlog.getAddress("LZ_GOV_SENDER");
@@ -97,6 +120,20 @@ abstract contract LZDeployTestBase is Test {
             requiredDVNs:         new address[](0),
             optionalDVNs:         govDVNs
         });
+
+        // The same route as installed on the remote chain: every provider has its own address there,
+        // and a receive config names the providers of the chain it sits on.
+        address[] memory remoteGovDVNs = new address[](7);
+        remoteGovDVNs[0] = 0x554833698Ae0FB22ECC90B01222903fD62CA4B47; // Canary
+        remoteGovDVNs[1] = 0x5b6735c66d97479cCD18294fc96B3084EcB2fa3f; // P2P
+        remoteGovDVNs[2] = 0x9e059a54699a285714207b43B055483E78FAac25; // LayerZero Labs
+        remoteGovDVNs[3] = 0xa0AF56164F02bDf9d75287ee77c568889F11d5f2; // Luganodes
+        remoteGovDVNs[4] = 0xa7b5189bcA84Cd304D8553977c7C614329750d99; // Horizen
+        remoteGovDVNs[5] = 0xc2A0C36f5939A14966705c7Cec813163FaEEa1F0; // Deutsche Telekom
+        remoteGovDVNs[6] = 0xcd37CA043f8479064e10635020c65FfC005d36f6; // Nethermind
+
+        remoteGovUlnCfg              = govUlnCfg;
+        remoteGovUlnCfg.optionalDVNs = remoteGovDVNs;
     }
 
     function _assertUlnConfig(bytes memory raw, UlnConfig memory expected) internal pure {

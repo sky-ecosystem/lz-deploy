@@ -3,23 +3,59 @@ pragma solidity ^0.8.24;
 
 import { console } from "forge-std/Script.sol";
 
+import { MessagingFee } from "@layerzerolabs/lz-evm-protocol-v2/contracts/interfaces/ILayerZeroEndpointV2.sol";
+
 import { LZInit } from "lz-init-lib/LZInit.sol";
+
+import { SSROracleForwarderLZ } from "xchain-ssr-oracle/forwarders/SSROracleForwarderLZ.sol";
+
+import { Bridge }                from "xchain-helpers/testing/Bridge.sol";
+import { Domain, DomainHelpers } from "xchain-helpers/testing/Domain.sol";
+import { LZBridgeTesting }       from "xchain-helpers/testing/bridges/LZBridgeTesting.sol";
 
 import { DeploySsrBridge }              from "script/DeploySsrBridge.s.sol";
 import { SendSideDeployer, CCIPDVNCfg } from "script/mocks/DvnDeployersFlat.sol";
 
-/// @notice Runs `DeploySsrBridge`, then the spell that consumes what it deployed:
+interface SUsdsLike {
+    function ssr() external view returns (uint256);
+    function chi() external view returns (uint192);
+    function rho() external view returns (uint64);
+}
+
+interface OracleLike {
+    function getSSR() external view returns (uint256);
+    function getChi() external view returns (uint256);
+    function getRho() external view returns (uint256);
+}
+
+/// @dev `refresh()` is payable and a script contract cannot be dealt a balance, so this stands in for
+///      whoever pays for a refresh.
+contract RefreshPayer {
+
+    function refresh(address forwarder, uint256 fee) external {
+        SSROracleForwarderLZ(forwarder).refresh{ value: fee }("", address(this));
+    }
+}
+
+/// @notice Runs `DeploySsrBridge`, then the spell that consumes what it deployed, and finally a
+///         `refresh()` relayed to the remote oracle:
 ///
 ///           anvil --fork-url <mainnet> --port 8545 --silent &
 ///           anvil --fork-url <remote>  --port 8547 --silent &
 ///           until cast block-number --rpc-url http://localhost:8547 >/dev/null 2>&1; do sleep 1; done
 ///
-///           BASE_RPC_URL=http://localhost:8547 \
+///           MAINNET_RPC_URL=http://localhost:8545 BASE_RPC_URL=http://localhost:8547 \
 ///             forge script script/test/CheckDeploySsrBridge.s.sol:CheckDeploySsrBridge \
 ///             --sig "check()" --rpc-url http://localhost:8545 --sender <a funded account>
 ///
 ///           pkill -f "anvil --fork-url"
 contract CheckDeploySsrBridge is DeploySsrBridge {
+
+    using DomainHelpers   for *;
+    using LZBridgeTesting for *;
+
+    Domain mainnet;
+    Bridge bridge;
 
     /// @dev The shared CCIP DVN adapter this template only reads: the Avalanche migration deploys it,
     ///      so a check that runs before that has to stand in for it.
@@ -54,6 +90,8 @@ contract CheckDeploySsrBridge is DeploySsrBridge {
     }
 
     function check() external {
+        mainnet = Domain({ chain: getChain("mainnet"), forkId: vm.activeFork() });
+
         address govSender = LZInit.chainlog.getAddress("LZ_GOV_SENDER");
 
         // The migration's mainnet half, which the forwarder's send set names.
@@ -74,18 +112,50 @@ contract CheckDeploySsrBridge is DeploySsrBridge {
         vm.deal(ccipDvnAdapter, ADAPTER_FUND);
         sendDep.handOff(new address[](0));
 
-        uint256 l1Fork = vm.activeFork();
+        (Deployed memory d, uint256 remoteFork) = run();
 
-        Deployed memory d = run();
+        bridge = LZBridgeTesting.createLZBridge(
+            mainnet,
+            Domain({ chain: getChain("base"), forkId: remoteFork })
+        );
 
         // --- mainnet: the spell that whitelists the forwarder on the adapter ---
-        vm.selectFork(l1Fork);
+        mainnet.selectFork();
 
         vm.startPrank(LZInit.chainlog.getAddress("MCD_PAUSE_PROXY"));
         LZInit.activateSsrForwarder(d.forwarder, REMOTE_EID, _forwarderCfg(d.receiver));
         vm.stopPrank();
 
+        // --- mainnet: a refresh, now that the CCIP DVN will verify for this forwarder ---
+        SUsdsLike susds = SUsdsLike(LZInit.chainlog.getAddress("SUSDS"));
+        uint256 ssr = susds.ssr();
+        uint256 chi = susds.chi();
+        uint256 rho = susds.rho();
+
+        _refresh(d.forwarder);
+
+        // --- the new chain: the message, and the compose call that writes the oracle ---
+        bridge.relayMessagesToDestination(true, d.forwarder, d.receiver);
+        bridge.relayComposeMessagesToDestination(true);
+
+        OracleLike oracle = OracleLike(d.oracle);
+        require(oracle.getSSR() == ssr, "CheckDeploySsrBridge/ssr-not-delivered");
+        require(oracle.getChi() == chi, "CheckDeploySsrBridge/chi-not-delivered");
+        require(oracle.getRho() == rho, "CheckDeploySsrBridge/rho-not-delivered");
+
         console.log("");
-        console.log("activateSsrForwarder accepted the deployed state");
+        console.log("activateSsrForwarder accepted the deployed state, and a refresh reached the oracle");
+    }
+
+    // --- helpers ---
+
+    /// @dev No `extraOptions`: the forwarder's enforced options already carry both the lzReceive and
+    ///      the lzCompose gas.
+    function _refresh(address forwarder) internal {
+        MessagingFee memory fee = SSROracleForwarderLZ(forwarder).quote("");
+
+        RefreshPayer payer = new RefreshPayer();
+        vm.deal(address(payer), fee.nativeFee);
+        payer.refresh(forwarder, fee.nativeFee);
     }
 }

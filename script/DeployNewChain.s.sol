@@ -6,6 +6,7 @@ import { Script, console } from "forge-std/Script.sol";
 import { RateLimitAccountingType } from "sky-oapp-oft/interfaces/ISkyRateLimiter.sol";
 
 import { LZInit, OftConfig, RateLimits, UlnConfig, ExecutorConfig } from "lz-init-lib/LZInit.sol";
+import { LZL2Spell }                                                from "lz-init-lib/LZL2Spell.sol";
 
 import { L2OFTDeployer, L2OftDeployment, RemoteWiring } from "src/L2OFTDeployer.sol";
 import { L2GovBridgeDeployer, GovRecvConfig }           from "src/L2GovBridgeDeployer.sol";
@@ -20,10 +21,12 @@ interface WardsLike {
 }
 
 /// @notice Brings a new chain onto SkyLink, pre-filled for Base: Sky's governance DVNs, the chain's
-///         half of the governance bridge, its USDS and sUSDS, and one OFT adapter per token.
-/// @dev    Run with mainnet as the active fork and `BASE_RPC_URL` set. Needs a funded key on both.
+///         half of the governance bridge, the L2 spell governance drives it with, its USDS and sUSDS,
+///         and one OFT adapter per token.
+/// @dev    Run with mainnet as the active fork. Needs a funded key on both chains. The remote fork
+///         is `BASE_RPC_URL` when set, and forge's own endpoint for the chain otherwise.
 ///
-///           BASE_RPC_URL=<base> forge script script/DeployNewChain.s.sol:DeployNewChain \
+///           forge script script/DeployNewChain.s.sol:DeployNewChain \
 ///             --rpc-url <mainnet_rpc> --sender <deployer> --broadcast --slow
 ///
 ///         Retarget by replacing the `REMOTE_*` constants and the endpoint, which is not guaranteed
@@ -136,17 +139,22 @@ contract DeployNewChain is Script {
         address msigBroadcaster;
         address receiver;
         address relay;
+        address l2Spell;
         address usds;
         address usdsAdapter;
+        address usdsAdapterImp;
         address susds;
         address susdsAdapter;
+        address susdsAdapterImp;
     }
 
-    function run() public returns (Deployed memory d) {
+    /// @return d          what a spell needs to name
+    /// @return remoteFork the fork this run created, for a caller relaying the spell's message
+    function run() public returns (Deployed memory d, uint256 remoteFork) {
         require(_ethCcipDvnAdapter() != address(0), "DeployNewChain/ccip-dvn-adapter-unset");
         require(_skyMultisig()       != address(0), "DeployNewChain/sky-multisig-unset");
 
-        uint256 remoteFork = vm.createFork(vm.envString("BASE_RPC_URL"));
+        remoteFork = vm.createFork(getChain("base").rpcUrl);
 
         // Read while mainnet is the active fork: the chainlog is a mainnet contract, and the two
         // lockboxes are the peers the adapters are wired to.
@@ -175,6 +183,9 @@ contract DeployNewChain is Script {
 
             _deployGovBridge(d, govSender, l1GovRelay, recvDep);
 
+            // Stateless and unowned: a spell passes it to `relayToL2`, and the relay delegatecalls it.
+            d.l2Spell = address(new LZL2Spell());
+
             vm.stopBroadcast();
 
             console.log("--- new chain ---");
@@ -184,14 +195,15 @@ contract DeployNewChain is Script {
             console.log("multisig broadcaster:  ", d.msigBroadcaster);
             console.log("GovernanceOAppReceiver:", d.receiver);
             console.log("L2GovernanceRelay:     ", d.relay);
+            console.log("LZL2Spell:             ", d.l2Spell);
         }
 
         // --- the new chain: the tokens and the adapters that mint them ---
         {
             vm.selectFork(remoteFork);
             vm.startBroadcast();
-            (d.usds,  d.usdsAdapter)  = _deployToken("USDS",  usdsOft,  d.relay, true);
-            (d.susds, d.susdsAdapter) = _deployToken("SUSDS", susdsOft, d.relay, false);
+            (d.usds,  d.usdsAdapter,  d.usdsAdapterImp)  = _deployToken("USDS",  usdsOft,  d.relay, true);
+            (d.susds, d.susdsAdapter, d.susdsAdapterImp) = _deployToken("SUSDS", susdsOft, d.relay, false);
             vm.stopBroadcast();
         }
 
@@ -238,19 +250,22 @@ contract DeployNewChain is Script {
     /// @dev The token, its adapter, and the authority handover: the adapter mints and burns, the relay
     ///      administers, the key keeps nothing.
     function _deployToken(string memory label, address peer, address relay, bool isUsds)
-        internal returns (address token, address oft)
+        internal returns (address token, address oft, address oftImp)
     {
         if (isUsds) token = UsdsDeploy.deployL2(msg.sender, msg.sender).usds;
         else        token = SUsdsDeploy.deploy(msg.sender, msg.sender).sUsds;
 
-        oft = address(new L2OFTDeployer(_oftDeployment(token, peer, relay)).oft());
+        L2OFTDeployer dep = new L2OFTDeployer(_oftDeployment(token, peer, relay));
+        oft    = address(dep.oft());
+        oftImp = dep.implementation();
 
         WardsLike(token).rely(oft);
         WardsLike(token).rely(relay);
         WardsLike(token).deny(msg.sender);
 
-        console.log(label, "token:  ", token);
-        console.log(label, "adapter:", oft);
+        console.log(label, "token:         ", token);
+        console.log(label, "adapter:       ", oft);
+        console.log(label, "implementation:", oftImp);
     }
 
     function _remoteOftCfg(address peer) internal pure returns (OftConfig memory) {

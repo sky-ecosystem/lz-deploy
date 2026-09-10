@@ -11,8 +11,11 @@ import {
     ExecutorConfig,
     OFTAdapterLike
 } from "lz-init-lib/LZInit.sol";
+import { LZL2Spell } from "lz-init-lib/LZL2Spell.sol";
 
-import { RateLimitAccountingType } from "sky-oapp-oft/interfaces/ISkyRateLimiter.sol";
+import { Bridge }                from "xchain-helpers/testing/Bridge.sol";
+import { Domain, DomainHelpers } from "xchain-helpers/testing/Domain.sol";
+import { LZBridgeTesting }       from "xchain-helpers/testing/bridges/LZBridgeTesting.sol";
 
 import { GovDvnSet }      from "script/GovDvnSet.sol";
 import { LzDvns }         from "script/LzDvns.sol";
@@ -22,18 +25,28 @@ import {
     CCIPDVNCfg
 } from "script/mocks/DvnDeployersFlat.sol";
 
-/// @notice Runs `DeployNewChain`, then the spell that consumes what it deployed:
+interface RelayLike {
+    function exec(uint256 actionId) external;
+}
+
+/// @notice Runs `DeployNewChain`, then the spell that consumes what it deployed, on both sides:
 ///
 ///           anvil --fork-url <mainnet> --port 8545 --silent &
 ///           anvil --fork-url <remote>  --port 8547 --silent &
 ///           until cast block-number --rpc-url http://localhost:8547 >/dev/null 2>&1; do sleep 1; done
 ///
-///           BASE_RPC_URL=http://localhost:8547 \
+///           MAINNET_RPC_URL=http://localhost:8545 BASE_RPC_URL=http://localhost:8547 \
 ///             forge script script/test/CheckDeployNewChain.s.sol:CheckDeployNewChain \
 ///             --sig "check()" --rpc-url http://localhost:8545 --sender <a funded account>
 ///
 ///           pkill -f "anvil --fork-url"
 contract CheckDeployNewChain is DeployNewChain {
+
+    using DomainHelpers   for *;
+    using LZBridgeTesting for *;
+
+    Domain mainnet;
+    Bridge bridge;
 
     /// @dev The shared CCIP DVN adapter this template only reads: the Avalanche migration deploys it,
     ///      so a check that runs before that has to stand in for it.
@@ -48,6 +61,9 @@ contract CheckDeployNewChain is DeployNewChain {
     uint128 constant CCIP_GAS     = 200_000;
     uint256 constant ADAPTER_FUND = 0.001 ether;
 
+    uint128 constant RELAY_GAS     = 500_000;
+    uint256 constant RELAY_MAX_FEE = 1 ether;
+
     function _ethCcipDvnAdapter() internal view override returns (address) {
         return ccipDvnAdapter;
     }
@@ -57,7 +73,8 @@ contract CheckDeployNewChain is DeployNewChain {
     }
 
     function check() external {
-        uint256 l1Fork     = vm.activeFork();
+        mainnet = Domain({ chain: getChain("mainnet"), forkId: vm.activeFork() });
+
         address govSender  = LZInit.chainlog.getAddress("LZ_GOV_SENDER");
         address pauseProxy = LZInit.chainlog.getAddress("MCD_PAUSE_PROXY");
         address usdsOft    = LZInit.chainlog.getAddress("USDS_OFT");
@@ -69,11 +86,15 @@ contract CheckDeployNewChain is DeployNewChain {
         SendSideDeployer sendDep = new SendSideDeployer(ETH_SEND_LIB, allowed);
         ccipDvnAdapter = address(sendDep.adapter());
 
-        Deployed memory d = run();
-        uint256 remoteFork = vm.activeFork();
+        (Deployed memory d, uint256 remoteFork) = run();
+
+        bridge = LZBridgeTesting.createLZBridge(
+            mainnet,
+            Domain({ chain: getChain("base"), forkId: remoteFork })
+        );
 
         // --- mainnet: the adapter's route to this chain, then the spell ---
-        vm.selectFork(l1Fork);
+        mainnet.selectFork();
 
         sendDep.configure(CCIPDVNCfg({
             remoteEid:               REMOTE_EID,
@@ -87,20 +108,31 @@ contract CheckDeployNewChain is DeployNewChain {
         vm.deal(ccipDvnAdapter, ADAPTER_FUND);
         sendDep.handOff(new address[](0));
 
+        vm.deal(LZInit.chainlog.getAddress("LZ_GOV_RELAY"), RELAY_MAX_FEE);
+
         vm.startPrank(pauseProxy);
         LZInit.wireGovPeer(REMOTE_EID, _govCfg(d));
+        LZInit.relayToL2({
+            remoteEid:  REMOTE_EID,
+            l2GovRelay: d.relay,
+            l2Spell:    d.l2Spell,
+            targetData: _activationCalls(d, usdsOft, susdsOft),
+            gas:        RELAY_GAS,
+            maxFee:     RELAY_MAX_FEE
+        });
         vm.stopPrank();
 
-        // --- the new chain: the spell the relay executes over both adapters ---
-        vm.selectFork(remoteFork);
+        // --- the new chain: the action the relay queues, executed once its delay has passed ---
+        bridge.relayMessagesToDestination(true, govSender, d.receiver);
 
-        vm.startPrank(d.relay);
-        _activate(d.usdsAdapter,  d.usds,  usdsOft,  d.relay);
-        _activate(d.susdsAdapter, d.susds, susdsOft, d.relay);
-        vm.stopPrank();
+        vm.warp(block.timestamp + RELAY_DELAY);
+        RelayLike(d.relay).exec(0);
+
+        _assertActivated(d.usdsAdapter);
+        _assertActivated(d.susdsAdapter);
 
         console.log("");
-        console.log("wireGovPeer and activateOft accepted the deployed state");
+        console.log("wireGovPeer and the relayed activateOft accepted the deployed state");
     }
 
     // --- helpers ---
@@ -126,18 +158,42 @@ contract CheckDeployNewChain is DeployNewChain {
         });
     }
 
-    function _activate(address oft, address token, address peer, address relay) internal {
-        LZInit.activateOft({
-            oft:              oft,
-            oftImp:           OFTAdapterLike(oft).getImplementation(),
-            remoteEid:        ETH_EID,
-            cfg:              _remoteOftCfg(peer),
-            rateLimits:       RateLimits(1 days, 1_000_000e18, 1 days, 1_000_000e18),
-            rlAccountingType: uint8(PER_EID_ACCOUNTING),
-            token:            token,
-            owner:            relay,
-            endpoint:         ENDPOINT
-        });
+    /// @dev Both adapters in one action, as the spell relays it.
+    function _activationCalls(Deployed memory d, address usdsOft, address susdsOft)
+        internal pure returns (bytes memory)
+    {
+        bytes[] memory calls = new bytes[](2);
+        calls[0] = _activation(d.usdsAdapter,  d.usdsAdapterImp,  d.usds,  usdsOft,  d.relay);
+        calls[1] = _activation(d.susdsAdapter, d.susdsAdapterImp, d.susds, susdsOft, d.relay);
+
+        return abi.encodeCall(LZL2Spell.multicall, (calls));
     }
 
+    function _activation(address oft, address oftImp, address token, address peer, address relay)
+        internal pure returns (bytes memory)
+    {
+        return abi.encodeCall(LZL2Spell.activateOft, (
+            oft,
+            oftImp,
+            ETH_EID,
+            _remoteOftCfg(peer),
+            _limits(),
+            uint8(PER_EID_ACCOUNTING),
+            token,
+            relay,
+            ENDPOINT
+        ));
+    }
+
+    function _assertActivated(address oft) internal view {
+        (,,, uint256 outLimit) = OFTAdapterLike(oft).outboundRateLimits(ETH_EID);
+        (,,, uint256 inLimit)  = OFTAdapterLike(oft).inboundRateLimits(ETH_EID);
+
+        require(outLimit == _limits().outboundLimit, "CheckDeployNewChain/outbound-limit-not-activated");
+        require(inLimit  == _limits().inboundLimit,  "CheckDeployNewChain/inbound-limit-not-activated");
+    }
+
+    function _limits() internal pure returns (RateLimits memory) {
+        return RateLimits(1 days, 1_000_000e18, 1 days, 1_000_000e18);
+    }
 }

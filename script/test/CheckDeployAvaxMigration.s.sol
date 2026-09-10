@@ -3,27 +3,40 @@ pragma solidity ^0.8.24;
 
 import { console } from "forge-std/Script.sol";
 
-import { LZInit, OftConfig, RateLimits, OFTAdapterLike } from "lz-init-lib/LZInit.sol";
+import { LZInit, OftConfig, RateLimits, UlnConfig, OFTAdapterLike, UlnLike, EndpointLike } from "lz-init-lib/LZInit.sol";
 import {
     LZAvaxMigrationInit,
     AvaxMigration,
     OftActivation
 } from "lz-init-lib/LZAvaxMigrationInit.sol";
 
+import { Bridge }                from "xchain-helpers/testing/Bridge.sol";
+import { Domain, DomainHelpers } from "xchain-helpers/testing/Domain.sol";
+import { LZBridgeTesting }       from "xchain-helpers/testing/bridges/LZBridgeTesting.sol";
+
 import { DeployAvaxMigration } from "script/DeployAvaxMigration.s.sol";
 
-/// @notice Runs `DeployAvaxMigration`, then the spell that consumes what it deployed:
+interface TokenLike   { function wards(address) external view returns (uint256); }
+interface OwnableLike { function owner() external view returns (address); }
+
+/// @notice Runs `DeployAvaxMigration`, then the spell that consumes what it deployed, on both sides:
 ///
 ///           anvil --fork-url <mainnet>   --port 8545 --silent &
 ///           anvil --fork-url <avalanche> --port 8546 --silent &
 ///           until cast block-number --rpc-url http://localhost:8546 >/dev/null 2>&1; do sleep 1; done
 ///
-///           AVAX_RPC_URL=http://localhost:8546 \
+///           MAINNET_RPC_URL=http://localhost:8545 AVALANCHE_RPC_URL=http://localhost:8546 \
 ///             forge script script/test/CheckDeployAvaxMigration.s.sol:CheckDeployAvaxMigration \
 ///             --sig "check()" --rpc-url http://localhost:8545 --sender <a funded account>
 ///
 ///           pkill -f "anvil --fork-url"
 contract CheckDeployAvaxMigration is DeployAvaxMigration {
+
+    using DomainHelpers   for *;
+    using LZBridgeTesting for *;
+
+    Domain mainnet;
+    Bridge bridge;
 
     uint128 constant RELAY_GAS     = 500_000;
     uint256 constant RELAY_MAX_FEE = 1 ether;
@@ -33,22 +46,88 @@ contract CheckDeployAvaxMigration is DeployAvaxMigration {
     }
 
     function check() external {
-        Deployed memory d = run();
+        mainnet = Domain({ chain: getChain("mainnet"), forkId: vm.activeFork() });
 
+        (Deployed memory d, uint256 avaxFork) = run();
+
+        bridge = LZBridgeTesting.createLZBridge(
+            mainnet,
+            Domain({ chain: getChain("avalanche"), forkId: avaxFork })
+        );
+
+        // --- mainnet: the spell, as the pause proxy executes it ---
+        mainnet.selectFork();
+
+        address govSender = LZInit.chainlog.getAddress("LZ_GOV_SENDER");
         vm.deal(LZInit.chainlog.getAddress("LZ_GOV_RELAY"), RELAY_MAX_FEE);
 
+        AvaxMigration memory m = _migration(d);
+
         vm.startPrank(LZInit.chainlog.getAddress("MCD_PAUSE_PROXY"));
-        LZAvaxMigrationInit.migrateAvax(_migration(d));
+        LZAvaxMigrationInit.migrateAvax(m);
         vm.stopPrank();
 
-        require(LZInit.chainlog.getAddress("USDS_OFT")  == d.usdsLockbox,  "CheckDeployAvaxMigration/usds-oft-not-repointed");
-        require(LZInit.chainlog.getAddress("SUSDS_OFT") == d.susdsLockbox, "CheckDeployAvaxMigration/susds-oft-not-repointed");
+        require(
+            LZInit.chainlog.getAddress("USDS_OFT") == d.usdsLockbox,
+            "CheckDeployAvaxMigration/usds-oft-not-repointed"
+        );
+        require(
+            LZInit.chainlog.getAddress("SUSDS_OFT") == d.susdsLockbox,
+            "CheckDeployAvaxMigration/susds-oft-not-repointed"
+        );
+
+        // --- Avalanche: the half the spell relays through the old relay ---
+        bridge.relayMessagesToDestination(true, govSender, AVAX_GOV_RECEIVER);
+
+        _assertRemote(d, m);
 
         console.log("");
-        console.log("migrateAvax accepted the deployed state");
+        console.log("migrateAvax accepted the deployed state, on both sides");
     }
 
     // --- helpers ---
+
+    /// @dev What `migrateAvaxRemote` was asked to do with the Avalanche half.
+    function _assertRemote(Deployed memory d, AvaxMigration memory m) internal view {
+        _assertActivated(d.avaxUsdsOft,  m.avaxUsds.rateLimits);
+        _assertActivated(d.avaxSusdsOft, m.avaxSusds.rateLimits);
+
+        require(
+            keccak256(abi.encode(_readRecvUln(AVAX_GOV_RECEIVER, ETH_EID))) == keccak256(abi.encode(m.recvUlnCfg)),
+            "CheckDeployAvaxMigration/gov-recv-uln-mismatch"
+        );
+
+        _assertAuthority(AVAX_USDS,  d.avaxUsdsOft,  LZAvaxMigrationInit.OLD_AVAX_USDS_OFT,  d.newRelay);
+        _assertAuthority(AVAX_SUSDS, d.avaxSusdsOft, LZAvaxMigrationInit.OLD_AVAX_SUSDS_OFT, d.newRelay);
+
+        require(
+            OwnableLike(AVAX_GOV_RECEIVER).owner() == d.newRelay,
+            "CheckDeployAvaxMigration/receiver-not-handed-over"
+        );
+    }
+
+    function _assertActivated(address oft, RateLimits memory rl) internal view {
+        (,,, uint256 outLimit) = OFTAdapterLike(oft).outboundRateLimits(ETH_EID);
+        (,,, uint256 inLimit)  = OFTAdapterLike(oft).inboundRateLimits(ETH_EID);
+
+        require(outLimit == rl.outboundLimit, "CheckDeployAvaxMigration/outbound-limit-not-activated");
+        require(inLimit  == rl.inboundLimit,  "CheckDeployAvaxMigration/inbound-limit-not-activated");
+    }
+
+    function _assertAuthority(address token, address newOft, address oldOft, address newRelay) internal view {
+        require(TokenLike(token).wards(newOft)   == 1, "CheckDeployAvaxMigration/new-adapter-not-relied");
+        require(TokenLike(token).wards(oldOft)   == 0, "CheckDeployAvaxMigration/old-adapter-not-denied");
+        require(TokenLike(token).wards(newRelay) == 1, "CheckDeployAvaxMigration/new-relay-not-relied");
+        require(
+            TokenLike(token).wards(LZAvaxMigrationInit.OLD_AVAX_GOV_RELAY) == 0,
+            "CheckDeployAvaxMigration/old-relay-not-denied"
+        );
+    }
+
+    function _readRecvUln(address oapp, uint32 srcEid) internal view returns (UlnConfig memory) {
+        (address recvLib,) = EndpointLike(AVAX_ENDPOINT).getReceiveLibrary(oapp, srcEid);
+        return UlnLike(recvLib).getAppUlnConfig(oapp, srcEid);
+    }
 
     /// @dev Every field the deployer decided is read back from `Deployed` or from the template's own
     ///      config helpers; what is left is the spell's policy: the limits it opens, the legacy
@@ -64,13 +143,11 @@ contract CheckDeployAvaxMigration is DeployAvaxMigration {
         m.ccipGas           = CCIP_GAS;
         m.l2Spell           = d.l2Spell;
 
-        m.usds  = _activation(d.usdsLockbox,  _l1OftCfg(d.avaxUsdsOft));
-        m.susds = _activation(d.susdsLockbox, _l1OftCfg(d.avaxSusdsOft));
+        m.usds  = _activation(d.usdsLockbox,  d.usdsLockboxImp,  _l1OftCfg(d.avaxUsdsOft));
+        m.susds = _activation(d.susdsLockbox, d.susdsLockboxImp, _l1OftCfg(d.avaxSusdsOft));
 
-        // Relayed for the L2 spell to verify on Avalanche, which this run does not execute, so the
-        // remote implementations are not read here.
-        m.avaxUsds  = OftActivation(d.avaxUsdsOft,  address(0), _avaxOftCfg(d.usdsLockbox),  _limits(), uint8(PER_EID_ACCOUNTING));
-        m.avaxSusds = OftActivation(d.avaxSusdsOft, address(0), _avaxOftCfg(d.susdsLockbox), _limits(), uint8(PER_EID_ACCOUNTING));
+        m.avaxUsds  = _activation(d.avaxUsdsOft,  d.avaxUsdsOftImp,  _avaxOftCfg(d.usdsLockbox));
+        m.avaxSusds = _activation(d.avaxSusdsOft, d.avaxSusdsOftImp, _avaxOftCfg(d.susdsLockbox));
 
         m.usdsGlobalLimits  = _limits();
         m.susdsGlobalLimits = _limits();
@@ -82,10 +159,12 @@ contract CheckDeployAvaxMigration is DeployAvaxMigration {
         m.maxFee = RELAY_MAX_FEE;
     }
 
-    function _activation(address oft, OftConfig memory cfg) internal view returns (OftActivation memory) {
+    function _activation(address oft, address oftImp, OftConfig memory cfg)
+        internal pure returns (OftActivation memory)
+    {
         return OftActivation({
             oft:              oft,
-            oftImp:           OFTAdapterLike(oft).getImplementation(),
+            oftImp:           oftImp,
             cfg:              cfg,
             rateLimits:       _limits(),
             rlAccountingType: uint8(PER_EID_ACCOUNTING)
