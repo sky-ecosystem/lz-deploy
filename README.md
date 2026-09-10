@@ -38,8 +38,8 @@ Out of scope, by design:
 src/L1OFTDeployer.sol            mainnet:   SkyOFTAdapter proxy, wired and handed to the pause proxy
 src/L2OFTDeployer.sol            new chain: SkyOFTAdapterMintBurn proxy, wired and handed to the relay
 src/L2GovBridgeDeployer.sol      new chain: GovernanceOAppReceiver + L2GovernanceRelay
-src/SsrForwarderDeployer.sol     mainnet:   SSROracleForwarderLZ
-src/SsrRemoteDeployer.sol        remote:    SSRAuthOracle + LZComposeReceiver
+src/L1SsrBridgeDeployer.sol      mainnet:   SSROracleForwarderLZ
+src/L2SsrBridgeDeployer.sol      remote:    SSRAuthOracle + LZComposeReceiver
 ```
 
 ## Deployment and configuration sequence
@@ -61,10 +61,10 @@ src/SsrRemoteDeployer.sol        remote:    SSRAuthOracle + LZComposeReceiver
 Each half holds the other's address immutably, so the remote deployer publishes where its receiver
 will land and the forwarder is built against that.
 
-1. `SsrRemoteDeployer(maxSSR, oracleAdmin)` on the remote — deploys the oracle, authorises the
+1. `L2SsrBridgeDeployer(maxSSR, oracleAdmin)` on the remote — deploys the oracle, authorises the
    receiver of step 3 on it, and settles its admin role.
-2. `SsrForwarderDeployer(dstEid, cfg)` on mainnet, `cfg.peer` set to
-   `SsrRemoteDeployer.predictedReceiver()` — deploys the forwarder, wires its send side, and hands it
+2. `L1SsrBridgeDeployer(dstEid, cfg)` on mainnet, `cfg.peer` set to
+   `L2SsrBridgeDeployer.predictedReceiver()` — deploys the forwarder, wires its send side, and hands it
    to `MCD_PAUSE_PROXY`.
 3. `deployReceiver(...)` on the remote — deploys the receiver, wires its receive side, and hands it to
    the relay.

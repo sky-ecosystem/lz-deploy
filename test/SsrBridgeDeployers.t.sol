@@ -9,8 +9,8 @@ import {
     OAppLike
 } from "lz-init-lib/LZInit.sol";
 
-import { SsrRemoteDeployer }    from "src/SsrRemoteDeployer.sol";
-import { SsrForwarderDeployer } from "src/SsrForwarderDeployer.sol";
+import { L1SsrBridgeDeployer } from "src/L1SsrBridgeDeployer.sol";
+import { L2SsrBridgeDeployer } from "src/L2SsrBridgeDeployer.sol";
 
 import { LZDeployTestBase } from "./LZDeployTestBase.sol";
 
@@ -37,7 +37,7 @@ interface ForwarderLike {
 /// @dev    Both halves run on one mainnet fork: the forwarder half is genuinely mainnet, and the
 ///         remote half only touches endpoint and OApp state, which is chain-agnostic. The remote side
 ///         is asserted directly, being unreadable from a mainnet spell.
-contract SsrDeployersTest is LZDeployTestBase {
+contract SsrBridgeDeployersTest is LZDeployTestBase {
 
     uint128 constant FWD_OPTIONS_GAS = 100_000;
     uint128 constant FWD_COMPOSE_GAS = 200_000;
@@ -47,7 +47,7 @@ contract SsrDeployersTest is LZDeployTestBase {
     address l2GovRelay  = makeAddr("l2GovRelay");
     address oracleAdmin = makeAddr("oracleAdmin");
 
-    SsrRemoteDeployer remoteDep;
+    L2SsrBridgeDeployer remoteDep;
 
     address forwarder;
     address receiver;
@@ -60,10 +60,10 @@ contract SsrDeployersTest is LZDeployTestBase {
         vm.startPrank(deployerEOA);
 
         // 1. remote: the oracle
-        remoteDep = new SsrRemoteDeployer(MAX_SSR, oracleAdmin);
+        remoteDep = new L2SsrBridgeDeployer(MAX_SSR, oracleAdmin);
 
         // 2. L1: forwarder, wired and handed off in its constructor, against the receiver address
-        //    the remote deployer will use
+        //    the L2 deployer will use
         fwdCfg = ForwarderConfig({
             peer:         remoteDep.predictedReceiver(),
             sendLib:      SEND_LIB,
@@ -73,7 +73,7 @@ contract SsrDeployersTest is LZDeployTestBase {
             optionsGas:   FWD_OPTIONS_GAS,
             composeGas:   FWD_COMPOSE_GAS
         });
-        forwarder = address(new SsrForwarderDeployer(DST_EID, fwdCfg).forwarder());
+        forwarder = address(new L1SsrBridgeDeployer(DST_EID, fwdCfg).forwarder());
 
         // 3. remote: receiver, now that the forwarder address is known, handed off in the same call
         remoteDep.deployReceiver(ENDPOINT, forwarder, RECV_LIB, govUlnCfg, l2GovRelay);
@@ -108,14 +108,17 @@ contract SsrDeployersTest is LZDeployTestBase {
 
         assertTrue(oracle.hasRole(oracle.DATA_PROVIDER_ROLE(), receiver));
         assertTrue(oracle.hasRole(oracle.DEFAULT_ADMIN_ROLE(), oracleAdmin));
-        assertFalse(oracle.hasRole(oracle.DEFAULT_ADMIN_ROLE(), address(remoteDep)), "deployer must renounce admin");
+        assertFalse(
+            oracle.hasRole(oracle.DEFAULT_ADMIN_ROLE(), address(remoteDep)),
+            "deployer must renounce admin"
+        );
     }
 
     /// @dev A zero admin leaves the oracle with none, freezing `maxSSR` and `DATA_PROVIDER_ROLE` for
     ///      good.
     function test_zeroOracleAdminLeavesNoAdmin() public {
         vm.prank(deployerEOA);
-        SsrRemoteDeployer dep = new SsrRemoteDeployer(MAX_SSR, address(0));
+        L2SsrBridgeDeployer dep = new L2SsrBridgeDeployer(MAX_SSR, address(0));
 
         OracleLike oracle = OracleLike(address(dep.oracle()));
         assertFalse(oracle.hasRole(oracle.DEFAULT_ADMIN_ROLE(), address(0)));
@@ -150,13 +153,13 @@ contract SsrDeployersTest is LZDeployTestBase {
     // ==================================
 
     function test_onlyDeployerCanDeployTheReceiver() public {
-        vm.expectRevert("SsrRemoteDeployer/not-deployer");
+        vm.expectRevert("L2SsrBridgeDeployer/not-deployer");
         remoteDep.deployReceiver(ENDPOINT, forwarder, RECV_LIB, govUlnCfg, l2GovRelay);
     }
 
     function test_receiverCannotBeDeployedTwice() public {
         vm.prank(deployerEOA);
-        vm.expectRevert("SsrRemoteDeployer/receiver-already-deployed");
+        vm.expectRevert("L2SsrBridgeDeployer/receiver-already-deployed");
         remoteDep.deployReceiver(ENDPOINT, forwarder, RECV_LIB, govUlnCfg, l2GovRelay);
     }
 }

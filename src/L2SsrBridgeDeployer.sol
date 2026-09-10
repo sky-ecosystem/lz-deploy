@@ -12,7 +12,7 @@ import { LZInit, UlnConfig, EndpointLike } from "lz-init-lib/LZInit.sol";
 ///         and the receiver takes the forwarder's: the constructor computes where the receiver will
 ///         land, the forwarder is built against that, and `deployReceiver` then creates it. The
 ///         README gives the cross-chain sequence.
-contract SsrRemoteDeployer {
+contract L2SsrBridgeDeployer {
 
     uint32 internal constant ETH_EID = 30101;
 
@@ -20,13 +20,13 @@ contract SsrRemoteDeployer {
 
     SSRAuthOracle public immutable oracle;
 
-    /// @notice The address `deployReceiver` will use. Give it to the L1 `SsrForwarderDeployer` first.
+    /// @notice The address `deployReceiver` will use. Give it to `L1SsrBridgeDeployer` first.
     address public immutable predictedReceiver;
 
     LZComposeReceiver public receiver;
 
     modifier onlyDeployer() {
-        require(msg.sender == deployer, "SsrRemoteDeployer/not-deployer");
+        require(msg.sender == deployer, "L2SsrBridgeDeployer/not-deployer");
         _;
     }
 
@@ -60,15 +60,15 @@ contract SsrRemoteDeployer {
         UlnConfig memory recvUlnCfg,
         address          gov
     ) external onlyDeployer {
-        require(address(receiver) == address(0), "SsrRemoteDeployer/receiver-already-deployed");
+        require(address(receiver) == address(0), "L2SsrBridgeDeployer/receiver-already-deployed");
 
         receiver = new LZComposeReceiver({
             _destinationEndpoint: endpoint,
-            _srcEid:             ETH_EID,
-            _sourceAuthority:    bytes32(uint256(uint160(forwarder))),
-            _target:             address(oracle),
-            _delegate:           address(this),
-            _owner:              address(this)
+            _srcEid:              ETH_EID,
+            _sourceAuthority:     bytes32(uint256(uint160(forwarder))),
+            _target:              address(oracle),
+            _delegate:            address(this),
+            _owner:               address(this)
         });
 
         EndpointLike(endpoint).setReceiveLibrary({

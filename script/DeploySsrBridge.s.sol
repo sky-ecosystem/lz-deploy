@@ -5,8 +5,8 @@ import { Script, console } from "forge-std/Script.sol";
 
 import { ForwarderConfig, UlnConfig, ExecutorConfig } from "lz-init-lib/LZInit.sol";
 
-import { SsrRemoteDeployer }    from "src/SsrRemoteDeployer.sol";
-import { SsrForwarderDeployer } from "src/SsrForwarderDeployer.sol";
+import { L1SsrBridgeDeployer } from "src/L1SsrBridgeDeployer.sol";
+import { L2SsrBridgeDeployer } from "src/L2SsrBridgeDeployer.sol";
 
 import { GovDvnSet } from "script/GovDvnSet.sol";
 import { LzDvns }    from "script/LzDvns.sol";
@@ -25,7 +25,7 @@ import { LzDvns }    from "script/LzDvns.sol";
 ///         adapter spliced into the LZ-aligned set on the send side, and both Sky wings' replicas plus
 ///         those providers on the receive side at threshold 2N.
 ///
-///         Ordering is forced by the two halves holding each other immutably; `SsrRemoteDeployer`
+///         Ordering is forced by the two halves holding each other immutably; `L2SsrBridgeDeployer`
 ///         documents it. Both chains must be broadcast from the same key, since that deployer only
 ///         takes orders from its creator.
 ///
@@ -129,7 +129,7 @@ contract DeploySsrBridge is Script {
         // --- the new chain: the oracle, authorising the receiver of the last step ---
         vm.selectFork(remoteFork);
         vm.startBroadcast();
-        SsrRemoteDeployer remoteDep = new SsrRemoteDeployer(MAX_SSR, _l2GovRelay());
+        L2SsrBridgeDeployer remoteDep = new L2SsrBridgeDeployer(MAX_SSR, _l2GovRelay());
         vm.stopBroadcast();
 
         // The deployer lives on this chain, so read its prediction before switching away.
@@ -153,7 +153,7 @@ contract DeploySsrBridge is Script {
         console.log("--- mainnet ---");
         console.log("SSROracleForwarderLZ:", d.forwarder);
         console.log("--- new chain ---");
-        console.log("SsrRemoteDeployer:   ", address(remoteDep));
+        console.log("L2SsrBridgeDeployer:   ", address(remoteDep));
         console.log("SSRAuthOracle:       ", d.oracle);
         console.log("LZComposeReceiver:   ", d.receiver);
     }
@@ -161,9 +161,9 @@ contract DeploySsrBridge is Script {
     // --- helpers ---
 
     function _deployForwarder(address receiver) internal returns (address) {
-        SsrForwarderDeployer dep = new SsrForwarderDeployer(REMOTE_EID, _forwarderCfg(receiver));
+        L1SsrBridgeDeployer dep = new L1SsrBridgeDeployer(REMOTE_EID, _forwarderCfg(receiver));
 
-        console.log("SsrForwarderDeployer:", address(dep));
+        console.log("L1SsrBridgeDeployer:", address(dep));
         return address(dep.forwarder());
     }
 
@@ -189,7 +189,7 @@ contract DeploySsrBridge is Script {
         });
     }
 
-    function _deployReceiver(SsrRemoteDeployer remoteDep, address forwarder) internal {
+    function _deployReceiver(L2SsrBridgeDeployer remoteDep, address forwarder) internal {
         address[] memory dvns = _recvDvns();
 
         remoteDep.deployReceiver({

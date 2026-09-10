@@ -6,7 +6,8 @@ import { Script, console } from "forge-std/Script.sol";
 import { RateLimitAccountingType } from "sky-oapp-oft/interfaces/ISkyRateLimiter.sol";
 
 import { LZInit, OftConfig, RateLimits, UlnConfig, ExecutorConfig } from "lz-init-lib/LZInit.sol";
-import { LZAvaxMigrationL2Spell }                                  from "lz-init-lib/LZAvaxMigrationL2Spell.sol";
+
+import { LZAvaxMigrationL2Spell } from "lz-init-lib/LZAvaxMigrationL2Spell.sol";
 
 import { GovernanceRelayDeploy } from "lz-governance-relay/deploy/GovernanceRelayDeploy.sol";
 
@@ -314,13 +315,17 @@ contract DeployAvaxMigration is Script {
         console.log("");
         console.log("Governance send set for the spell's sendUlnCfg - 255 required (NIL), optional");
         console.log(sendUlnCfg.optionalDVNThreshold, "of", sendUlnCfg.optionalDVNCount);
-        for (uint256 i; i < sendUlnCfg.optionalDVNs.length; ++i) console.log("  ", sendUlnCfg.optionalDVNs[i]);
+        for (uint256 i; i < sendUlnCfg.optionalDVNs.length; ++i) {
+            console.log("  ", sendUlnCfg.optionalDVNs[i]);
+        }
         console.log("ccipDvnIndex:", ccipDvnIndex);
 
         console.log("");
         console.log("Governance receive set for migrateAvaxRemote's recvUlnCfg - optional");
         console.log(recvUlnCfg.optionalDVNThreshold, "of", recvUlnCfg.optionalDVNCount);
-        for (uint256 i; i < recvUlnCfg.optionalDVNs.length; ++i) console.log("  ", recvUlnCfg.optionalDVNs[i]);
+        for (uint256 i; i < recvUlnCfg.optionalDVNs.length; ++i) {
+            console.log("  ", recvUlnCfg.optionalDVNs[i]);
+        }
     }
 
     /// @dev The adapter spliced into the LZ-aligned providers, and the index the spell dereferences

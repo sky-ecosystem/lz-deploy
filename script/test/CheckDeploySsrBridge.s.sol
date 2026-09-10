@@ -5,7 +5,7 @@ import { console } from "forge-std/Script.sol";
 
 import { LZInit } from "lz-init-lib/LZInit.sol";
 
-import { DeploySsrBridge } from "script/DeploySsrBridge.s.sol";
+import { DeploySsrBridge }              from "script/DeploySsrBridge.s.sol";
 import { SendSideDeployer, CCIPDVNCfg } from "script/mocks/DvnDeployersFlat.sol";
 
 /// @notice Runs `DeploySsrBridge`, then the spell that consumes what it deployed:
@@ -48,7 +48,8 @@ contract CheckDeploySsrBridge is DeploySsrBridge {
         dvns = new address[](providers.length + REPLICAS);
         for (uint256 i; i < providers.length; ++i) dvns[i] = providers[i];
         for (uint256 i; i < REPLICAS; ++i) {
-            dvns[providers.length + i] = address(uint160(0xf0F0000000000000000000000000000000000000) + uint160(i));
+            dvns[providers.length + i] =
+                address(uint160(0xf0F0000000000000000000000000000000000000) + uint160(i));
         }
     }
 

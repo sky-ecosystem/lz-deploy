@@ -11,9 +11,9 @@ import { LZInit, ForwarderConfig, SetConfigParam, EndpointLike, OAppLike } from 
 /// @notice Deploys the mainnet half of an SSR oracle bridge, wires its send side and hands it to
 ///         `MCD_PAUSE_PROXY`.
 /// @dev    `cfg.peer` is the remote `LZComposeReceiver`, which the forwarder also holds immutably as
-///         its oracle, so it must already be known: it is `SsrRemoteDeployer.predictedReceiver()`,
+///         its oracle, so it must already be known: it is `L2SsrBridgeDeployer.predictedReceiver()`,
 ///         read before this runs. The README gives the cross-chain sequence.
-contract SsrForwarderDeployer {
+contract L1SsrBridgeDeployer {
 
     using OptionsBuilder for bytes;
 

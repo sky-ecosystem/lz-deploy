@@ -121,7 +121,10 @@ contract L1OFTDeployerTest is LZDeployTestBase {
     // ==================================
 
     function test_deploysAndConfiguresLockbox() public view {
-        assertEq(SkyLockboxLike(oft).aggregateRateLimitAccountingType(), uint8(RateLimitAccountingType.Gross));
+        assertEq(
+            SkyLockboxLike(oft).aggregateRateLimitAccountingType(),
+            uint8(RateLimitAccountingType.Gross)
+        );
 
         assertTrue(SkyOFTPauserLike(oft).pausers(breaker));
 
