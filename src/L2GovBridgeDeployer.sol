@@ -2,7 +2,7 @@
 pragma solidity ^0.8.24;
 
 import { GovernanceOAppReceiver } from "sky-oapp-oft/GovernanceOAppReceiver.sol";
-import { GovernanceRelayDeploy }  from "lz-governance-relay/deploy/GovernanceRelayDeploy.sol";
+import { L2GovernanceRelay }      from "lz-governance-relay/src/L2GovernanceRelay.sol";
 
 import { LZInit, UlnConfig, EndpointLike } from "lz-init-lib/LZInit.sol";
 
@@ -40,14 +40,14 @@ contract L2GovBridgeDeployer {
             _owner:                       address(this)
         });
 
-        relay = GovernanceRelayDeploy.deployL2({
-            l1Eid:             ETH_EID,
-            l2Oapp:            address(receiver),
-            l1GovernanceRelay: l1GovRelay,
-            delay:             delay,
-            gracePeriod:       gracePeriod,
-            bud:               bud
-        });
+        relay = address(new L2GovernanceRelay({
+            l1Eid_:             ETH_EID,
+            l2Oapp_:            address(receiver),
+            l1GovernanceRelay_: l1GovRelay,
+            delay_:             delay,
+            gracePeriod_:       gracePeriod,
+            bud_:               bud
+        }));
 
         EndpointLike(endpoint).setReceiveLibrary({
             oapp:        address(receiver),

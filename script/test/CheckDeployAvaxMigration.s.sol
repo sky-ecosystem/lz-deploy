@@ -107,11 +107,13 @@ contract CheckDeployAvaxMigration is DeployAvaxMigration {
     }
 
     function _assertActivated(address oft, RateLimits memory rl) internal view {
-        (,,, uint256 outLimit) = OFTAdapterLike(oft).outboundRateLimits(ETH_EID);
-        (,,, uint256 inLimit)  = OFTAdapterLike(oft).inboundRateLimits(ETH_EID);
+        (, uint48 outWindow,, uint256 outLimit) = OFTAdapterLike(oft).outboundRateLimits(ETH_EID);
+        (, uint48 inWindow,,  uint256 inLimit)  = OFTAdapterLike(oft).inboundRateLimits(ETH_EID);
 
-        require(outLimit == rl.outboundLimit, "CheckDeployAvaxMigration/outbound-limit-not-activated");
-        require(inLimit  == rl.inboundLimit,  "CheckDeployAvaxMigration/inbound-limit-not-activated");
+        require(outLimit  == rl.outboundLimit,  "CheckDeployAvaxMigration/outbound-limit-not-activated");
+        require(outWindow == rl.outboundWindow, "CheckDeployAvaxMigration/outbound-window-not-activated");
+        require(inLimit   == rl.inboundLimit,   "CheckDeployAvaxMigration/inbound-limit-not-activated");
+        require(inWindow  == rl.inboundWindow,  "CheckDeployAvaxMigration/inbound-window-not-activated");
     }
 
     function _assertAuthority(address token, address newOft, address oldOft, address newRelay) internal view {
@@ -172,6 +174,6 @@ contract CheckDeployAvaxMigration is DeployAvaxMigration {
     }
 
     function _limits() internal pure returns (RateLimits memory) {
-        return RateLimits(1 days, 1_000_000e18, 1 days, 1_000_000e18);
+        return RateLimits(1 days, 1_000_000e18, 1 days + 1, 1_000_000e18 + 1);
     }
 }

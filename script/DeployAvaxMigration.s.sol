@@ -9,7 +9,7 @@ import { LZInit, OftConfig, RateLimits, UlnConfig, ExecutorConfig } from "lz-ini
 
 import { LZAvaxMigrationL2Spell } from "lz-init-lib/LZAvaxMigrationL2Spell.sol";
 
-import { GovernanceRelayDeploy } from "lz-governance-relay/deploy/GovernanceRelayDeploy.sol";
+import { L2GovernanceRelay } from "lz-governance-relay/src/L2GovernanceRelay.sol";
 
 import { GovDvnSet } from "script/GovDvnSet.sol";
 import { LzDvns }    from "script/LzDvns.sol";
@@ -270,14 +270,14 @@ contract DeployAvaxMigration is Script {
         d.ccipBroadcaster = address(recvDep.ccipBroadcaster());
         d.msigBroadcaster = address(recvDep.msigBroadcaster());
 
-        d.newRelay = GovernanceRelayDeploy.deployL2({
-            l1Eid:             ETH_EID,
-            l2Oapp:            AVAX_GOV_RECEIVER,
-            l1GovernanceRelay: l1GovRelay,
-            delay:             RELAY_DELAY,
-            gracePeriod:       RELAY_GRACE_PERIOD,
-            bud:               _bud()
-        });
+        d.newRelay = address(new L2GovernanceRelay({
+            l1Eid_:             ETH_EID,
+            l2Oapp_:            AVAX_GOV_RECEIVER,
+            l1GovernanceRelay_: l1GovRelay,
+            delay_:             RELAY_DELAY,
+            gracePeriod_:       RELAY_GRACE_PERIOD,
+            bud_:               _bud()
+        }));
 
         d.l2Spell = address(new LZAvaxMigrationL2Spell());
 

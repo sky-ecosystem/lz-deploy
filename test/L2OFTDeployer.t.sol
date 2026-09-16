@@ -80,18 +80,20 @@ contract L2OFTDeployerTest is LZDeployTestBase {
         RateLimits memory limits = RateLimits({
             inboundWindow:  1 days,
             inboundLimit:   10_000_000e18,
-            outboundWindow: 1 days,
-            outboundLimit:  10_000_000e18
+            outboundWindow: 1 days + 1,
+            outboundLimit:  10_000_000e18 + 1
         });
 
         uint32[2] memory eids = [DST_EID, OTHER_EID];
 
         for (uint256 i; i < eids.length; ++i) {
             // Zero until the spell runs: `activateOft` requires that, and is what opens them.
-            (,,, uint256 outLimit) = OFTAdapterLike(oft).outboundRateLimits(eids[i]);
-            (,,, uint256 inLimit)  = OFTAdapterLike(oft).inboundRateLimits(eids[i]);
-            assertEq(outLimit, 0);
-            assertEq(inLimit,  0);
+            (, uint48 outWindow,, uint256 outLimit) = OFTAdapterLike(oft).outboundRateLimits(eids[i]);
+            (, uint48 inWindow,,  uint256 inLimit)  = OFTAdapterLike(oft).inboundRateLimits(eids[i]);
+            assertEq(outLimit,  0);
+            assertEq(outWindow, 0);
+            assertEq(inLimit,   0);
+            assertEq(inWindow,  0);
 
             vm.startPrank(l2GovRelay);
             LZInit.activateOft({
@@ -107,10 +109,12 @@ contract L2OFTDeployerTest is LZDeployTestBase {
             });
             vm.stopPrank();
 
-            (,,, outLimit) = OFTAdapterLike(oft).outboundRateLimits(eids[i]);
-            (,,, inLimit)  = OFTAdapterLike(oft).inboundRateLimits(eids[i]);
-            assertEq(outLimit, limits.outboundLimit, "outbound limit not activated");
-            assertEq(inLimit,  limits.inboundLimit,  "inbound limit not activated");
+            (, outWindow,, outLimit) = OFTAdapterLike(oft).outboundRateLimits(eids[i]);
+            (, inWindow,,  inLimit)  = OFTAdapterLike(oft).inboundRateLimits(eids[i]);
+            assertEq(outLimit,  limits.outboundLimit,  "outbound limit not activated");
+            assertEq(outWindow, limits.outboundWindow, "outbound window not activated");
+            assertEq(inLimit,   limits.inboundLimit,   "inbound limit not activated");
+            assertEq(inWindow,  limits.inboundWindow,  "inbound window not activated");
         }
     }
 
@@ -125,14 +129,16 @@ contract L2OFTDeployerTest is LZDeployTestBase {
     /// @dev The other model: live at handoff, with no `activateOft` to follow.
     function test_setsPerRemoteRateLimits() public {
         L2OftDeployment memory d = _deployment();
-        d.remotes[0].rateLimits  = RateLimits(1 days, 5e18, 1 days, 4e18);
+        d.remotes[0].rateLimits  = RateLimits(1 days, 5e18, 1 days + 1, 4e18);
 
         address live = address(new L2OFTDeployer(d).oft());
 
-        (,,, uint256 outLimit) = OFTAdapterLike(live).outboundRateLimits(DST_EID);
-        (,,, uint256 inLimit)  = OFTAdapterLike(live).inboundRateLimits(DST_EID);
-        assertEq(outLimit, 4e18);
-        assertEq(inLimit,  5e18);
+        (, uint48 outWindow,, uint256 outLimit) = OFTAdapterLike(live).outboundRateLimits(DST_EID);
+        (, uint48 inWindow,,  uint256 inLimit)  = OFTAdapterLike(live).inboundRateLimits(DST_EID);
+        assertEq(outLimit,  4e18);
+        assertEq(outWindow, 1 days + 1);
+        assertEq(inLimit,   5e18);
+        assertEq(inWindow,  1 days);
     }
 
     function test_revertsOnDuplicateRemote() public {

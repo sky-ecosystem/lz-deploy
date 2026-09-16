@@ -70,8 +70,6 @@ land and the forwarder is built against that.
    the relay.
 4. The L1 spell — `activateSsrForwarder`.
 
-Nothing can be sent before step 4: it whitelists the forwarder on the shared CCIP DVN adapter.
-
 ## Build
 
 ```bash

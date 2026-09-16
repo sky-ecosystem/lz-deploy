@@ -186,14 +186,18 @@ contract CheckDeployNewChain is DeployNewChain {
     }
 
     function _assertActivated(address oft) internal view {
-        (,,, uint256 outLimit) = OFTAdapterLike(oft).outboundRateLimits(ETH_EID);
-        (,,, uint256 inLimit)  = OFTAdapterLike(oft).inboundRateLimits(ETH_EID);
+        (, uint48 outWindow,, uint256 outLimit) = OFTAdapterLike(oft).outboundRateLimits(ETH_EID);
+        (, uint48 inWindow,,  uint256 inLimit)  = OFTAdapterLike(oft).inboundRateLimits(ETH_EID);
 
-        require(outLimit == _limits().outboundLimit, "CheckDeployNewChain/outbound-limit-not-activated");
-        require(inLimit  == _limits().inboundLimit,  "CheckDeployNewChain/inbound-limit-not-activated");
+        RateLimits memory rl = _limits();
+
+        require(outLimit  == rl.outboundLimit,  "CheckDeployNewChain/outbound-limit-not-activated");
+        require(outWindow == rl.outboundWindow, "CheckDeployNewChain/outbound-window-not-activated");
+        require(inLimit   == rl.inboundLimit,   "CheckDeployNewChain/inbound-limit-not-activated");
+        require(inWindow  == rl.inboundWindow,  "CheckDeployNewChain/inbound-window-not-activated");
     }
 
     function _limits() internal pure returns (RateLimits memory) {
-        return RateLimits(1 days, 1_000_000e18, 1 days, 1_000_000e18);
+        return RateLimits(1 days, 1_000_000e18, 1 days + 1, 1_000_000e18 + 1);
     }
 }
