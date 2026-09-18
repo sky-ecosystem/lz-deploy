@@ -14,7 +14,7 @@ import { Bridge }                from "xchain-helpers/testing/Bridge.sol";
 import { Domain, DomainHelpers } from "xchain-helpers/testing/Domain.sol";
 import { LZBridgeTesting }       from "xchain-helpers/testing/bridges/LZBridgeTesting.sol";
 
-import { DeployAvaxMigration } from "script/DeployAvaxMigration.s.sol";
+import { DeployAvaxMigration } from "script/examples/DeployAvaxMigration.s.sol";
 
 interface TokenLike   { function wards(address) external view returns (uint256); }
 interface OwnableLike { function owner() external view returns (address); }
@@ -26,7 +26,7 @@ interface OwnableLike { function owner() external view returns (address); }
 ///           until cast block-number --rpc-url http://localhost:8546 >/dev/null 2>&1; do sleep 1; done
 ///
 ///           MAINNET_RPC_URL=http://localhost:8545 AVALANCHE_RPC_URL=http://localhost:8546 \
-///             forge script script/test/CheckDeployAvaxMigration.s.sol:CheckDeployAvaxMigration \
+///             forge script script/examples/test/CheckDeployAvaxMigration.s.sol:CheckDeployAvaxMigration \
 ///             --sig "check()" --rpc-url http://localhost:8545 --sender <a funded account>
 ///
 ///           pkill -f "anvil --fork-url"

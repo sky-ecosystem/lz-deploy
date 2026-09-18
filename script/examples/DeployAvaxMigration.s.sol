@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 pragma solidity ^0.8.24;
 
+// Unaudited example, provided without guarantee: fill in its addresses and re-check every step
+// and parameter against the target deployment before use.
+
 import { Script, console } from "forge-std/Script.sol";
 
 import { RateLimitAccountingType } from "sky-oapp-oft/interfaces/ISkyRateLimiter.sol";
@@ -11,13 +14,13 @@ import { LZAvaxMigrationL2Spell } from "lz-init-lib/LZAvaxMigrationL2Spell.sol";
 
 import { L2GovernanceRelay } from "lz-governance-relay/src/L2GovernanceRelay.sol";
 
-import { GovDvnSet } from "script/GovDvnSet.sol";
-import { LzDvns }    from "script/LzDvns.sol";
+import { GovDvnSet } from "script/examples/GovDvnSet.sol";
+import { LzDvns }    from "script/examples/LzDvns.sol";
 import {
     SendSideDeployer,
     RecvSideDeployer,
     CCIPDVNCfg
-} from "script/mocks/DvnDeployersFlat.sol";
+} from "script/examples/mocks/DvnDeployersFlat.sol";
 
 // The two deployers declare their own `RemoteWiring`, so the identical structs are distinct types.
 import { L1OFTDeployer, L1OftDeployment, RemoteWiring as L1RemoteWiring } from "src/L1OFTDeployer.sol";
@@ -28,7 +31,7 @@ import { L2OFTDeployer, L2OftDeployment, RemoteWiring as L2RemoteWiring } from "
 /// @dev    Run with mainnet as the active fork. The Avalanche fork is `AVALANCHE_RPC_URL` when set,
 ///         and forge's own endpoint for the chain otherwise:
 ///
-///           forge script script/DeployAvaxMigration.s.sol:DeployAvaxMigration \
+///           forge script script/examples/DeployAvaxMigration.s.sol:DeployAvaxMigration \
 ///             --rpc-url <mainnet_rpc> --sender <deployer> --broadcast --slow
 ///
 ///         Avalanche is deployed first, against *predicted* mainnet lockbox addresses, because each

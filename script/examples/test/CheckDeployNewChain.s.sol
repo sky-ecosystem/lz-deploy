@@ -17,13 +17,13 @@ import { Bridge }                from "xchain-helpers/testing/Bridge.sol";
 import { Domain, DomainHelpers } from "xchain-helpers/testing/Domain.sol";
 import { LZBridgeTesting }       from "xchain-helpers/testing/bridges/LZBridgeTesting.sol";
 
-import { GovDvnSet }      from "script/GovDvnSet.sol";
-import { LzDvns }         from "script/LzDvns.sol";
-import { DeployNewChain } from "script/DeployNewChain.s.sol";
+import { GovDvnSet }      from "script/examples/GovDvnSet.sol";
+import { LzDvns }         from "script/examples/LzDvns.sol";
+import { DeployNewChain } from "script/examples/DeployNewChain.s.sol";
 import {
     SendSideDeployer,
     CCIPDVNCfg
-} from "script/mocks/DvnDeployersFlat.sol";
+} from "script/examples/mocks/DvnDeployersFlat.sol";
 
 interface RelayLike {
     function exec(uint256 actionId) external;
@@ -36,7 +36,7 @@ interface RelayLike {
 ///           until cast block-number --rpc-url http://localhost:8547 >/dev/null 2>&1; do sleep 1; done
 ///
 ///           MAINNET_RPC_URL=http://localhost:8545 BASE_RPC_URL=http://localhost:8547 \
-///             forge script script/test/CheckDeployNewChain.s.sol:CheckDeployNewChain \
+///             forge script script/examples/test/CheckDeployNewChain.s.sol:CheckDeployNewChain \
 ///             --sig "check()" --rpc-url http://localhost:8545 --sender <a funded account>
 ///
 ///           pkill -f "anvil --fork-url"

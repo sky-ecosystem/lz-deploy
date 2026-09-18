@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 pragma solidity ^0.8.24;
 
+// Unaudited example, provided without guarantee: fill in its addresses and re-check every step
+// and parameter against the target deployment before use.
+
 import { Script, console } from "forge-std/Script.sol";
 
 import { RateLimitAccountingType } from "sky-oapp-oft/interfaces/ISkyRateLimiter.sol";
@@ -11,9 +14,9 @@ import { LZL2Spell }                                                from "lz-ini
 import { L2OFTDeployer, L2OftDeployment, RemoteWiring } from "src/L2OFTDeployer.sol";
 import { L2GovBridgeDeployer, GovRecvConfig }           from "src/L2GovBridgeDeployer.sol";
 
-import { GovDvnSet }               from "script/GovDvnSet.sol";
-import { RecvSideDeployer }        from "script/mocks/DvnDeployersFlat.sol";
-import { UsdsDeploy, SUsdsDeploy } from "script/mocks/TokenDeployFlat.sol";
+import { GovDvnSet }               from "script/examples/GovDvnSet.sol";
+import { RecvSideDeployer }        from "script/examples/mocks/DvnDeployersFlat.sol";
+import { UsdsDeploy, SUsdsDeploy } from "script/examples/mocks/TokenDeployFlat.sol";
 
 interface WardsLike {
     function rely(address usr) external;
@@ -26,7 +29,7 @@ interface WardsLike {
 /// @dev    Run with mainnet as the active fork. Needs a funded key on both chains. The remote fork
 ///         is `BASE_RPC_URL` when set, and forge's own endpoint for the chain otherwise.
 ///
-///           forge script script/DeployNewChain.s.sol:DeployNewChain \
+///           forge script script/examples/DeployNewChain.s.sol:DeployNewChain \
 ///             --rpc-url <mainnet_rpc> --sender <deployer> --broadcast --slow
 ///
 ///         Retarget by replacing the `REMOTE_*` constants and the endpoint, which is not guaranteed

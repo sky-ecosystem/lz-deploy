@@ -13,8 +13,8 @@ import { Bridge }                from "xchain-helpers/testing/Bridge.sol";
 import { Domain, DomainHelpers } from "xchain-helpers/testing/Domain.sol";
 import { LZBridgeTesting }       from "xchain-helpers/testing/bridges/LZBridgeTesting.sol";
 
-import { DeploySsrBridge }              from "script/DeploySsrBridge.s.sol";
-import { SendSideDeployer, CCIPDVNCfg } from "script/mocks/DvnDeployersFlat.sol";
+import { DeploySsrBridge }              from "script/examples/DeploySsrBridge.s.sol";
+import { SendSideDeployer, CCIPDVNCfg } from "script/examples/mocks/DvnDeployersFlat.sol";
 
 interface SUsdsLike {
     function ssr() external view returns (uint256);
@@ -45,7 +45,7 @@ contract RefreshPayer {
 ///           until cast block-number --rpc-url http://localhost:8547 >/dev/null 2>&1; do sleep 1; done
 ///
 ///           MAINNET_RPC_URL=http://localhost:8545 BASE_RPC_URL=http://localhost:8547 \
-///             forge script script/test/CheckDeploySsrBridge.s.sol:CheckDeploySsrBridge \
+///             forge script script/examples/test/CheckDeploySsrBridge.s.sol:CheckDeploySsrBridge \
 ///             --sig "check()" --rpc-url http://localhost:8545 --sender <a funded account>
 ///
 ///           pkill -f "anvil --fork-url"

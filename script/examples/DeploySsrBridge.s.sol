@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 pragma solidity ^0.8.24;
 
+// Unaudited example, provided without guarantee: fill in its addresses and re-check every step
+// and parameter against the target deployment before use.
+
 import { Script, console } from "forge-std/Script.sol";
 
 import { ForwarderConfig, UlnConfig, ExecutorConfig } from "lz-init-lib/LZInit.sol";
@@ -8,8 +11,8 @@ import { ForwarderConfig, UlnConfig, ExecutorConfig } from "lz-init-lib/LZInit.s
 import { L1SsrBridgeDeployer } from "src/L1SsrBridgeDeployer.sol";
 import { L2SsrBridgeDeployer } from "src/L2SsrBridgeDeployer.sol";
 
-import { GovDvnSet } from "script/GovDvnSet.sol";
-import { LzDvns }    from "script/LzDvns.sol";
+import { GovDvnSet } from "script/examples/GovDvnSet.sol";
+import { LzDvns }    from "script/examples/LzDvns.sol";
 
 /// @notice Deploys an SSR oracle bridge over LayerZero, pre-filled for Base: the mainnet forwarder,
 ///         and the remote oracle and receiver.
@@ -19,7 +22,7 @@ import { LzDvns }    from "script/LzDvns.sol";
 ///         can also be added to a chain brought up long ago. The remote fork is `BASE_RPC_URL` when
 ///         set, and forge's own endpoint for the chain otherwise.
 ///
-///           forge script script/DeploySsrBridge.s.sol:DeploySsrBridge \
+///           forge script script/examples/DeploySsrBridge.s.sol:DeploySsrBridge \
 ///             --rpc-url <mainnet_rpc> --sender <deployer> --broadcast --slow
 ///
 ///         The route duplicates the governance one over the same deployed DVNs: the shared CCIP DVN

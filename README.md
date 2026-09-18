@@ -29,6 +29,9 @@ Out of scope, by design:
 - **Tokens and their mint/burn authority.** The token is an input, not an output: both OFT deployers
   take the ERC20 as a parameter and never touch its wards. Deploying the L2 token and granting the L2
   adapter authority over it happen elsewhere.
+- **The deployment scripts.** `script/examples/` holds unaudited examples of driving these deployers,
+  partially pre-filled for one target remote and provided without guarantee. Each has to be filled in
+  and re-checked in full against the deployment it is used for.
 - **Stars governance**, which lz-init-lib does not cover either.
 - **Solana governance and token bridging**, which has no Solidity equivalent.
 
