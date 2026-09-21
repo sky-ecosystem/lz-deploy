@@ -47,16 +47,19 @@ src/L2SsrBridgeDeployer.sol      remote:    SSRAuthOracle + LZComposeReceiver
 
 ## Deployment and configuration sequence
 
+These sequences are illustrative and not exhaustive.
+
 ### A new chain
 
 1. The DVN infrastructure, from `lz-gov-dvns-deploy` — its replica addresses are inputs to step 2's
    governance ULN config.
 2. `L2GovBridgeDeployer` — deploys the receiver and the relay every later step hands off to.
-3. The chain's tokens — each adapter takes its token as a constructor immutable.
-4. `L2OFTDeployer`, one per token — deploys and wires an adapter; `rely` it on its token afterwards.
-5. `LZL2Spell` — stateless and unowned, so no deployer owns it; its address is what a spell passes to
+3. `LZL2Spell` — stateless and unowned, so no deployer owns it; its address is what a spell passes to
    `relayToL2`.
-6. The L1 spell — `LZDVNInit.wireCCIPDVN` for the new chain's route on the shared CCIP DVN adapter,
+4. Per token: the token, then `L2OFTDeployer` against it — the adapter takes its token as a
+   constructor immutable — then `rely` the adapter and the relay on that token and `deny` the
+   deploying key.
+5. The L1 spell — `LZDVNInit.wireCCIPDVN` for the new chain's route on the shared CCIP DVN adapter,
    then `wireGovPeer`, `wireOftPeer` and `activateOft`.
 
 ### An SSR bridge
