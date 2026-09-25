@@ -42,7 +42,8 @@ contract RefreshPayer {
 ///
 ///           anvil --fork-url <mainnet> --port 8545 --silent &
 ///           anvil --fork-url <remote>  --port 8547 --silent &
-///           until cast block-number --rpc-url http://localhost:8547 >/dev/null 2>&1; do sleep 1; done
+///           until cast block-number --rpc-url http://localhost:8545 >/dev/null 2>&1 \
+///              && cast block-number --rpc-url http://localhost:8547 >/dev/null 2>&1; do sleep 1; done
 ///
 ///           MAINNET_RPC_URL=http://localhost:8545 BASE_RPC_URL=http://localhost:8547 \
 ///             forge script script/examples/test/CheckDeploySsrBridge.s.sol:CheckDeploySsrBridge \
@@ -119,14 +120,13 @@ contract CheckDeploySsrBridge is DeploySsrBridge {
             Domain({ chain: getChain("base"), forkId: remoteFork })
         );
 
-        // --- mainnet: the spell that whitelists the forwarder on the adapter ---
         mainnet.selectFork();
 
         vm.startPrank(LZInit.chainlog.getAddress("MCD_PAUSE_PROXY"));
         LZInit.activateSsrForwarder(d.forwarder, REMOTE_EID, _forwarderCfg(d.receiver));
         vm.stopPrank();
 
-        // --- mainnet: a refresh, now that the CCIP DVN will verify for this forwarder ---
+        // A refresh, now that the CCIP DVN will verify for this forwarder.
         SUsdsLike susds = SUsdsLike(LZInit.chainlog.getAddress("SUSDS"));
         uint256 ssr = susds.ssr();
         uint256 chi = susds.chi();

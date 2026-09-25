@@ -9,6 +9,7 @@ import {
     AvaxMigration,
     OftActivation
 } from "lz-init-lib/LZAvaxMigrationInit.sol";
+import { LZL2Spell } from "lz-init-lib/LZL2Spell.sol";
 
 import { Bridge }                from "xchain-helpers/testing/Bridge.sol";
 import { Domain, DomainHelpers } from "xchain-helpers/testing/Domain.sol";
@@ -18,12 +19,15 @@ import { DeployAvaxMigration } from "script/examples/DeployAvaxMigration.s.sol";
 
 interface TokenLike   { function wards(address) external view returns (uint256); }
 interface OwnableLike { function owner() external view returns (address); }
+interface RelayLike   { function exec(uint256 actionId) external; }
 
-/// @notice Runs `DeployAvaxMigration`, then the spell that consumes what it deployed, on both sides:
+/// @notice Runs `DeployAvaxMigration`, then the spell that consumes what it deployed, on both sides,
+///         and finally one action through the relay that spell hands governance to:
 ///
 ///           anvil --fork-url <mainnet>   --port 8545 --silent &
 ///           anvil --fork-url <avalanche> --port 8546 --silent &
-///           until cast block-number --rpc-url http://localhost:8546 >/dev/null 2>&1; do sleep 1; done
+///           until cast block-number --rpc-url http://localhost:8545 >/dev/null 2>&1 \
+///              && cast block-number --rpc-url http://localhost:8546 >/dev/null 2>&1; do sleep 1; done
 ///
 ///           MAINNET_RPC_URL=http://localhost:8545 AVALANCHE_RPC_URL=http://localhost:8546 \
 ///             forge script script/examples/test/CheckDeployAvaxMigration.s.sol:CheckDeployAvaxMigration \
@@ -55,7 +59,6 @@ contract CheckDeployAvaxMigration is DeployAvaxMigration {
             Domain({ chain: getChain("avalanche"), forkId: avaxFork })
         );
 
-        // --- mainnet: the spell, as the pause proxy executes it ---
         mainnet.selectFork();
 
         address govSender = LZInit.chainlog.getAddress("LZ_GOV_SENDER");
@@ -76,16 +79,45 @@ contract CheckDeployAvaxMigration is DeployAvaxMigration {
             "CheckDeployAvaxMigration/susds-oft-not-repointed"
         );
 
-        // --- Avalanche: the half the spell relays through the old relay ---
+        // --- Avalanche: the half the spell relays ---
         bridge.relayMessagesToDestination(true, govSender, AVAX_GOV_RECEIVER);
 
         _assertRemote(d, m);
 
+        _relayThroughNewRelay(d, govSender);
+
         console.log("");
-        console.log("migrateAvax accepted the deployed state, on both sides");
+        console.log("migrateAvax accepted the deployed state, and the new relay carries an action");
     }
 
     // --- helpers ---
+
+    function _relayThroughNewRelay(Deployed memory d, address govSender) internal {
+        RateLimits memory rl = RateLimits(2 days, 2_000_000e18, 2 days + 1, 2_000_000e18 + 1);
+
+        address l2Spell = address(new LZL2Spell());
+
+        mainnet.selectFork();
+        vm.deal(LZInit.chainlog.getAddress("LZ_GOV_RELAY"), RELAY_MAX_FEE);
+
+        vm.startPrank(LZInit.chainlog.getAddress("MCD_PAUSE_PROXY"));
+        LZInit.relayToL2({
+            remoteEid:  AVAX_EID,
+            l2GovRelay: d.newRelay,
+            l2Spell:    l2Spell,
+            targetData: abi.encodeCall(LZL2Spell.updateRateLimits, (d.avaxUsdsOft, ETH_EID, rl)),
+            gas:        RELAY_GAS,
+            maxFee:     RELAY_MAX_FEE
+        });
+        vm.stopPrank();
+
+        bridge.relayMessagesToDestination(true, govSender, AVAX_GOV_RECEIVER);
+
+        vm.warp(block.timestamp + RELAY_DELAY);
+        RelayLike(d.newRelay).exec(0);
+
+        _assertActivated(d.avaxUsdsOft, rl);
+    }
 
     /// @dev What `migrateAvaxRemote` was asked to do with the Avalanche half.
     function _assertRemote(Deployed memory d, AvaxMigration memory m) internal view {
@@ -139,7 +171,7 @@ contract CheckDeployAvaxMigration is DeployAvaxMigration {
         m.recvUlnCfg = _govRecvUlnCfg(d.recvDvns);
 
         m.newL2GovRelay     = d.newRelay;
-        m.ccipAllowlistSize = 1;             // the governance sender, kept through the handoff
+        m.ccipAllowlistSize = 1;  // the governance sender, kept through the handoff
         m.ccipRemoteAdapter = d.avaxCcipAdapter;
         m.ccipBroadcaster   = d.ccipBroadcaster;
         m.ccipGas           = CCIP_GAS;

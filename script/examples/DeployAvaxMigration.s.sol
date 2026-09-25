@@ -251,7 +251,7 @@ contract DeployAvaxMigration is Script {
             remoteCcipAdapter:       d.avaxCcipAdapter,
             remoteCcipBroadcaster:   d.ccipBroadcaster,
             sendLib:                 ETH_SEND_LIB,
-            multiplierBps:           0,       // the adapter's break-even default
+            multiplierBps:           0,  // the adapter's break-even default
             gas:                     CCIP_GAS
         }));
 
@@ -360,7 +360,7 @@ contract DeployAvaxMigration is Script {
 
         return (UlnConfig({
             confirmations:        ETH_CONFIRMATIONS,
-            requiredDVNCount:     255,       // NIL: explicitly no required DVNs
+            requiredDVNCount:     255,  // NIL: explicitly no required DVNs
             optionalDVNCount:     uint8(dvns.length),
             optionalDVNThreshold: GOV_SEND_THRESHOLD,
             requiredDVNs:         new address[](0),
@@ -370,8 +370,8 @@ contract DeployAvaxMigration is Script {
 
     function _govRecvUlnCfg(address[] memory recvDvns) internal pure returns (UlnConfig memory) {
         return UlnConfig({
-            confirmations:        AVAX_CONFIRMATIONS,
-            requiredDVNCount:     255,
+            confirmations:        ETH_CONFIRMATIONS,
+            requiredDVNCount:     255,  // NIL: explicitly no required DVNs
             optionalDVNCount:     uint8(recvDvns.length),
             optionalDVNThreshold: GOV_RECV_THRESHOLD,
             requiredDVNs:         new address[](0),
@@ -424,12 +424,12 @@ contract DeployAvaxMigration is Script {
 
     function _l1OftCfg(address peer) internal pure returns (OftConfig memory) {
         return _oftCfg(peer, ETH_SEND_LIB, ETH_RECV_LIB, ETH_EXECUTOR, LzDvns.ethOftDVNs(),
-                       ETH_CONFIRMATIONS, ETH_TO_AVAX_OPTIONS_GAS);
+                       ETH_CONFIRMATIONS, AVAX_CONFIRMATIONS, ETH_TO_AVAX_OPTIONS_GAS);
     }
 
     function _avaxOftCfg(address peer) internal pure returns (OftConfig memory) {
         return _oftCfg(peer, AVAX_SEND_LIB, AVAX_RECV_LIB, AVAX_EXECUTOR, _avaxOftDVNs(),
-                       AVAX_CONFIRMATIONS, AVAX_TO_ETH_OPTIONS_GAS);
+                       AVAX_CONFIRMATIONS, ETH_CONFIRMATIONS, AVAX_TO_ETH_OPTIONS_GAS);
     }
 
     function _oftCfg(
@@ -438,26 +438,31 @@ contract DeployAvaxMigration is Script {
         address          recvLib,
         address          executor,
         address[] memory dvns,
-        uint64           confirmations,
+        uint64           sendConfirmations,
+        uint64           recvConfirmations,
         uint128          optionsGas
     ) internal pure returns (OftConfig memory) {
-        UlnConfig memory uln = UlnConfig({
+        return OftConfig({
+            peer:       peer,
+            sendLib:    sendLib,
+            execCfg:    ExecutorConfig({ maxMessageSize: MAX_MESSAGE_SIZE, executor: executor }),
+            sendUlnCfg: _oftUlnCfg(dvns, sendConfirmations),
+            recvLib:    recvLib,
+            recvUlnCfg: _oftUlnCfg(dvns, recvConfirmations),
+            optionsGas: optionsGas
+        });
+    }
+
+    function _oftUlnCfg(address[] memory dvns, uint64 confirmations)
+        internal pure returns (UlnConfig memory)
+    {
+        return UlnConfig({
             confirmations:        confirmations,
             requiredDVNCount:     uint8(dvns.length),
             optionalDVNCount:     0,
             optionalDVNThreshold: 0,
             requiredDVNs:         dvns,
             optionalDVNs:         new address[](0)
-        });
-
-        return OftConfig({
-            peer:       peer,
-            sendLib:    sendLib,
-            execCfg:    ExecutorConfig({ maxMessageSize: MAX_MESSAGE_SIZE, executor: executor }),
-            sendUlnCfg: uln,
-            recvLib:    recvLib,
-            recvUlnCfg: uln,
-            optionsGas: optionsGas
         });
     }
 }

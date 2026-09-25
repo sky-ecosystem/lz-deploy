@@ -33,7 +33,8 @@ interface RelayLike {
 ///
 ///           anvil --fork-url <mainnet> --port 8545 --silent &
 ///           anvil --fork-url <remote>  --port 8547 --silent &
-///           until cast block-number --rpc-url http://localhost:8547 >/dev/null 2>&1; do sleep 1; done
+///           until cast block-number --rpc-url http://localhost:8545 >/dev/null 2>&1 \
+///              && cast block-number --rpc-url http://localhost:8547 >/dev/null 2>&1; do sleep 1; done
 ///
 ///           MAINNET_RPC_URL=http://localhost:8545 BASE_RPC_URL=http://localhost:8547 \
 ///             forge script script/examples/test/CheckDeployNewChain.s.sol:CheckDeployNewChain \
@@ -93,7 +94,6 @@ contract CheckDeployNewChain is DeployNewChain {
             Domain({ chain: getChain("base"), forkId: remoteFork })
         );
 
-        // --- mainnet: the adapter's route to this chain, then the spell ---
         mainnet.selectFork();
 
         sendDep.configure(CCIPDVNCfg({
@@ -147,7 +147,7 @@ contract CheckDeployNewChain is DeployNewChain {
             execCfg:      ExecutorConfig({ maxMessageSize: MAX_MESSAGE_SIZE, executor: ETH_EXECUTOR }),
             sendUlnCfg:   UlnConfig({
                 confirmations:        ETH_CONFIRMATIONS,
-                requiredDVNCount:     255,       // NIL: explicitly no required DVNs
+                requiredDVNCount:     255,  // NIL: explicitly no required DVNs
                 optionalDVNCount:     uint8(dvns.length),
                 optionalDVNThreshold: uint8(dvns.length),
                 requiredDVNs:         new address[](0),

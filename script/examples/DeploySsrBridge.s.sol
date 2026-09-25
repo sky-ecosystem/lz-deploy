@@ -183,7 +183,7 @@ contract DeploySsrBridge is Script {
             execCfg:      ExecutorConfig({ maxMessageSize: MAX_MESSAGE_SIZE, executor: ETH_EXECUTOR }),
             sendUlnCfg:   UlnConfig({
                 confirmations:        ETH_CONFIRMATIONS,
-                requiredDVNCount:     255,       // NIL: explicitly no required DVNs
+                requiredDVNCount:     255,  // NIL: explicitly no required DVNs
                 optionalDVNCount:     uint8(dvns.length),
                 optionalDVNThreshold: SEND_THRESHOLD,
                 requiredDVNs:         new address[](0),
@@ -204,13 +204,13 @@ contract DeploySsrBridge is Script {
             recvLib:    REMOTE_RECV_LIB,
             recvUlnCfg: UlnConfig({
                 confirmations:        ETH_CONFIRMATIONS,
-                requiredDVNCount:     255,       // NIL: explicitly no required DVNs
+                requiredDVNCount:     255,  // NIL: explicitly no required DVNs
                 optionalDVNCount:     uint8(dvns.length),
                 optionalDVNThreshold: RECV_THRESHOLD,
                 requiredDVNs:         new address[](0),
                 optionalDVNs:         dvns
             }),
-            gov:        _l2GovRelay()            // the relay owns the receiver and is its delegate
+            gov:        _l2GovRelay()  // the relay owns the receiver and is its delegate
         });
     }
 }
