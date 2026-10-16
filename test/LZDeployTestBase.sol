@@ -33,7 +33,7 @@ abstract contract LZDeployTestBase is Test {
     uint32 constant ETH_EID  = 30101;
     uint32 constant DST_EID  = 30184; // Base, the remote side of the route
 
-    uint128 constant OFT_OPTIONS_GAS = 130_000;
+    uint128 constant OFT_OPTIONS_GAS = 200_000;
 
     /// @dev The suite asserts against live mainnet state, so the block is pinned rather than
     ///      overridable: at another height those references are different values.
@@ -87,7 +87,7 @@ abstract contract LZDeployTestBase is Test {
         oftSendUlnCfg = UlnConfig({
             confirmations:        15,
             requiredDVNCount:     4,
-            optionalDVNCount:     0,
+            optionalDVNCount:     255,  // NIL: explicitly no optional DVNs
             optionalDVNThreshold: 0,
             requiredDVNs:         oftRequiredDVNs,
             optionalDVNs:         new address[](0)
@@ -96,7 +96,7 @@ abstract contract LZDeployTestBase is Test {
         oftRecvUlnCfg = UlnConfig({
             confirmations:        12,
             requiredDVNCount:     4,
-            optionalDVNCount:     0,
+            optionalDVNCount:     255,  // NIL: explicitly no optional DVNs
             optionalDVNThreshold: 0,
             requiredDVNs:         oftRequiredDVNs,
             optionalDVNs:         new address[](0)

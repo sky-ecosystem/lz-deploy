@@ -59,10 +59,10 @@ contract CheckDeployNewChain is DeployNewChain {
     address constant ETH_SEND_LIB = 0xbB2Ea70C9E858123480642Cf96acbcCE1372dCe1;
     address constant ETH_EXECUTOR = 0x173272739Bd7Aa6e4e214714048a9fE699453059;
 
-    uint128 constant CCIP_GAS     = 200_000;
+    uint128 constant CCIP_GAS     = 400_000;
     uint256 constant ADAPTER_FUND = 0.001 ether;
 
-    uint128 constant RELAY_GAS     = 500_000;
+    uint128 constant RELAY_GAS     = 3_000_000;
     uint256 constant RELAY_MAX_FEE = 1 ether;
 
     function _ethCcipDvnAdapter() internal view override returns (address) {

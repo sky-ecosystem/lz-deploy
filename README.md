@@ -65,8 +65,14 @@ These sequences are illustrative and not exhaustive.
 4. Per token: the token, then `L2OFTDeployer` against it — the adapter takes its token as a
    constructor immutable — then `rely` the adapter and the relay on that token and `deny` the
    deploying key.
-5. The L1 spell — `LZDVNInit.wireCCIPDVN` for the new chain's route on the shared CCIP DVN adapter,
-   then `wireGovPeer`, `wireOftPeer` and `activateOft`.
+5. The L1 spell:
+   - `LZDVNInit.wireCCIPDVN` for the new chain's route on the shared CCIP DVN adapter.
+   - `wireGovPeer` for the governance path.
+   - `wireOftPeer` on each existing lockbox, with the intended rate limits, to add the new chain's
+     adapter as a remote.
+   - `relayToL2` carrying `LZL2Spell.activateOft` for each new adapter left at zero rate limits in
+     step 4, which is what opens them; adapters already wired with non-zero limits need no relayed
+     call.
 
 ### An SSR bridge
 

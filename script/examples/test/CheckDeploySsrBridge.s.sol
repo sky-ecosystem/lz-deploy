@@ -65,7 +65,7 @@ contract CheckDeploySsrBridge is DeploySsrBridge {
     /// @dev Four CCIP and four multisig replicas, as `DeployNewChain` deploys.
     uint256 constant REPLICAS = 8;
 
-    uint128 constant CCIP_GAS     = 200_000;
+    uint128 constant CCIP_GAS     = 400_000;
     uint256 constant ADAPTER_FUND = 0.001 ether;
 
     function _ethCcipDvnAdapter() internal view override returns (address) {
