@@ -34,7 +34,8 @@ Out of scope, by design:
   against `L2SsrBridgeDeployer.oracle()` once a consumer needs it.
 - **The deployment scripts.** `script/examples/` holds unaudited examples of driving these deployers,
   partially pre-filled for one target remote and provided without guarantee. Each has to be filled in
-  and re-checked in full against the deployment it is used for.
+  and re-checked in full against the deployment it is used for. Their gas values have to be
+  re-measured for the chains and EVM version a deployment targets.
 - **Stars governance**, which lz-init-lib does not cover either.
 - **Solana governance and token bridging**, which has no Solidity equivalent.
 
