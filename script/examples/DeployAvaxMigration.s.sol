@@ -90,7 +90,7 @@ contract DeployAvaxMigration is Script {
     ///      and paid, and delivery is gated by the destination's — it only has to exceed 1.
     uint8 constant GOV_SEND_THRESHOLD = 8;
 
-    uint128 constant CCIP_GAS = 200_000;
+    uint128 constant CCIP_GAS = 400_000;
 
     /// @dev The CCIP fee is taken before the send library's deposit lands on the first send.
     uint256 constant ADAPTER_FUND = 0.001 ether;
@@ -121,8 +121,8 @@ contract DeployAvaxMigration is Script {
 
     /// @dev One figure per leg: the gas is spent on the destination, so benchmark each direction
     ///      rather than copying the other.
-    uint128 constant ETH_TO_AVAX_OPTIONS_GAS = 130_000;
-    uint128 constant AVAX_TO_ETH_OPTIONS_GAS = 130_000;
+    uint128 constant ETH_TO_AVAX_OPTIONS_GAS = 200_000;
+    uint128 constant AVAX_TO_ETH_OPTIONS_GAS = 200_000;
 
     /// @dev Each endpoint's own default for this route.
     uint64 constant ETH_CONFIRMATIONS  = 15;
@@ -459,7 +459,7 @@ contract DeployAvaxMigration is Script {
         return UlnConfig({
             confirmations:        confirmations,
             requiredDVNCount:     uint8(dvns.length),
-            optionalDVNCount:     0,
+            optionalDVNCount:     255,  // NIL: explicitly no optional DVNs
             optionalDVNThreshold: 0,
             requiredDVNs:         dvns,
             optionalDVNs:         new address[](0)

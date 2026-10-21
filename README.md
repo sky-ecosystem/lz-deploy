@@ -34,7 +34,8 @@ Out of scope, by design:
   against `L2SsrBridgeDeployer.oracle()` once a consumer needs it.
 - **The deployment scripts.** `script/examples/` holds unaudited examples of driving these deployers,
   partially pre-filled for one target remote and provided without guarantee. Each has to be filled in
-  and re-checked in full against the deployment it is used for.
+  and re-checked in full against the deployment it is used for. Their gas values have to be
+  re-measured for the chains and EVM version a deployment targets.
 - **Stars governance**, which lz-init-lib does not cover either.
 - **Solana governance and token bridging**, which has no Solidity equivalent.
 
@@ -65,8 +66,14 @@ These sequences are illustrative and not exhaustive.
 4. Per token: the token, then `L2OFTDeployer` against it — the adapter takes its token as a
    constructor immutable — then `rely` the adapter and the relay on that token and `deny` the
    deploying key.
-5. The L1 spell — `LZDVNInit.wireCCIPDVN` for the new chain's route on the shared CCIP DVN adapter,
-   then `wireGovPeer`, `wireOftPeer` and `activateOft`.
+5. The L1 spell:
+   - `LZDVNInit.wireCCIPDVN` for the new chain's route on the shared CCIP DVN adapter.
+   - `wireGovPeer` for the governance path.
+   - `wireOftPeer` on each existing lockbox, with the intended rate limits, to add the new chain's
+     adapter as a remote.
+   - `relayToL2` carrying `LZL2Spell.activateOft` for each new adapter left at zero rate limits in
+     step 4, which is what opens them; adapters already wired with non-zero limits need no relayed
+     call.
 
 ### An SSR bridge
 

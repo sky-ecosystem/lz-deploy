@@ -93,7 +93,7 @@ contract DeployNewChain is Script {
 
     /// @dev The only leg this script wires is outbound to mainnet, so one figure covers it; the spell
     ///      that wires the return leg sets its own.
-    uint128 constant OFT_OPTIONS_GAS_TO_ETH = 130_000;
+    uint128 constant OFT_OPTIONS_GAS_TO_ETH = 200_000;
 
     uint8 constant CCIP_REPLICAS = 4;
     uint8 constant MSIG_REPLICAS = 4;
@@ -291,7 +291,7 @@ contract DeployNewChain is Script {
         return UlnConfig({
             confirmations:        confirmations,
             requiredDVNCount:     uint8(dvns.length),
-            optionalDVNCount:     0,
+            optionalDVNCount:     255,  // NIL: explicitly no optional DVNs
             optionalDVNThreshold: 0,
             requiredDVNs:         dvns,
             optionalDVNs:         new address[](0)

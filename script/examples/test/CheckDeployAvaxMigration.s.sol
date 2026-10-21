@@ -42,7 +42,7 @@ contract CheckDeployAvaxMigration is DeployAvaxMigration {
     Domain mainnet;
     Bridge bridge;
 
-    uint128 constant RELAY_GAS     = 500_000;
+    uint128 constant RELAY_GAS     = 1_500_000;
     uint256 constant RELAY_MAX_FEE = 1 ether;
 
     function _skyMultisig() internal pure override returns (address) {
