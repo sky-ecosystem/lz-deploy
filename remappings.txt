@@ -1,0 +1,10 @@
+forge-std/=lib/forge-std/src/
+sky-oapp-oft/=lib/sky-oapp-oft/contracts/
+lz-governance-relay/=lib/lz-governance-relay/
+lz-init-lib/=lib/lz-init-lib/deploy/
+xchain-ssr-oracle/=lib/xchain-ssr-oracle/src/
+xchain-helpers/=lib/xchain-ssr-oracle/lib/xchain-helpers/src/
+@layerzerolabs/=node_modules/@layerzerolabs/
+@openzeppelin/=node_modules/@openzeppelin/
+layerzerolabs/oapp-evm/=node_modules/@layerzerolabs/oapp-evm/
+openzeppelin-contracts/contracts/=node_modules/@openzeppelin/contracts/
