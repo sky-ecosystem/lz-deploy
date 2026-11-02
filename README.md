@@ -102,3 +102,14 @@ forge build
 ```bash
 MAINNET_RPC_URL=<mainnet_rpc> forge test
 ```
+
+## Audits
+
+Audit reports are hosted on the auditors' public portfolio pages:
+
+| Auditor | Report | Date |
+| --- | --- | --- |
+| ChainSecurity | [Sky LZ Deploy](https://www.chainsecurity.com/security-audit/sky-lz-deploy/) | 2026-10-21 |
+| Cantina | [Sky: LZ Deployer](https://cantina.xyz/portfolio/ae48a607-fa01-4f75-8824-93b05341aca0) | 2026-10-13 |
+
+ChainSecurity reports are cumulative: each portfolio page hosts the latest version of the report, which covers all previously reviewed versions.
